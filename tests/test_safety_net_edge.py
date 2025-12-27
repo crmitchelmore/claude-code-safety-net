@@ -3,9 +3,11 @@
 import io
 import json
 import os
+import shlex
 from unittest import mock
 
 from scripts import safety_net
+from scripts.safety_net_impl.hook import _segment_changes_cwd
 
 from .safety_net_test_base import SafetyNetTestCase
 
@@ -124,6 +126,41 @@ class EdgeCasesTests(SafetyNetTestCase):
         parsed: dict = json.loads(output)
         self.assertEqual(parsed["hookSpecificOutput"]["permissionDecision"], "deny")
 
+    def test_strict_mode_non_dict_input_denies(self) -> None:
+        with mock.patch.dict(os.environ, {"SAFETY_NET_STRICT": "1"}):
+            with mock.patch("sys.stdin", io.StringIO(json.dumps([1, 2, 3]))):
+                with mock.patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+                    result = safety_net.main()
+                    output = mock_stdout.getvalue()
+
+        self.assertEqual(result, 0)
+        parsed: dict = json.loads(output)
+        self.assertEqual(parsed["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_strict_mode_missing_tool_input_denies(self) -> None:
+        input_data = {"tool_name": "Bash"}
+        with mock.patch.dict(os.environ, {"SAFETY_NET_STRICT": "1"}):
+            with mock.patch("sys.stdin", io.StringIO(json.dumps(input_data))):
+                with mock.patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+                    result = safety_net.main()
+                    output = mock_stdout.getvalue()
+
+        self.assertEqual(result, 0)
+        parsed: dict = json.loads(output)
+        self.assertEqual(parsed["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_strict_mode_non_dict_tool_input_denies(self) -> None:
+        input_data = {"tool_name": "Bash", "tool_input": ["command"]}
+        with mock.patch.dict(os.environ, {"SAFETY_NET_STRICT": "1"}):
+            with mock.patch("sys.stdin", io.StringIO(json.dumps(input_data))):
+                with mock.patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+                    result = safety_net.main()
+                    output = mock_stdout.getvalue()
+
+        self.assertEqual(result, 0)
+        parsed: dict = json.loads(output)
+        self.assertEqual(parsed["hookSpecificOutput"]["permissionDecision"], "deny")
+
     def test_strict_mode_parse_error_denies(self) -> None:
         input_data = {
             "tool_name": "Bash",
@@ -141,6 +178,37 @@ class EdgeCasesTests(SafetyNetTestCase):
         reason = parsed["hookSpecificOutput"]["permissionDecisionReason"]
         self.assertIn("strict mode", reason)
         self.assertIn("unset SAFETY_NET_STRICT", reason)
+
+    def test_strict_mode_bash_c_without_arg_denies(self) -> None:
+        with mock.patch.dict(os.environ, {"SAFETY_NET_STRICT": "1"}):
+            self._assert_blocked(
+                "bash -c",
+                "shell -c wrapper",
+            )
+
+    def test_bash_double_dash_does_not_treat_dash_c_as_wrapper_allowed(self) -> None:
+        self._assert_allowed("bash -- -c 'echo ok'")
+
+    def test_sh_lc_wrapper_blocked(self) -> None:
+        self._assert_blocked(
+            "sh -lc 'git reset --hard'",
+            "git reset --hard",
+        )
+
+    def test_non_strict_unparseable_rm_rf_still_blocked_by_heuristic(self) -> None:
+        self._assert_blocked("rm -rf /some/path 'unterminated", "rm -rf")
+
+    def test_non_strict_unparseable_git_push_f_still_blocked_by_heuristic(self) -> None:
+        self._assert_blocked(
+            "git push -f origin main 'unterminated",
+            "Force push",
+        )
+
+    def test_non_strict_unparseable_find_delete_blocked_by_heuristic(self) -> None:
+        self._assert_blocked(
+            "find . -delete 'unterminated",
+            "find -delete",
+        )
 
     def test_deny_output_redacts_url_credentials(self) -> None:
         input_data = {
@@ -160,3 +228,306 @@ class EdgeCasesTests(SafetyNetTestCase):
         parsed: dict = json.loads(output)
         reason = parsed["hookSpecificOutput"]["permissionDecisionReason"]
         self.assertNotIn("abc123", reason)
+
+    def test_pipe_stderr_and_stdout_split_blocked(self) -> None:
+        self._assert_blocked(
+            "echo ok |& git reset --hard",
+            "git reset --hard",
+        )
+
+    def test_or_operator_split_blocked(self) -> None:
+        self._assert_blocked(
+            "git status || git reset --hard",
+            "git reset --hard",
+        )
+
+    def test_semicolon_split_blocked(self) -> None:
+        self._assert_blocked(
+            "git status; git reset --hard",
+            "git reset --hard",
+        )
+
+    def test_newline_split_blocked(self) -> None:
+        self._assert_blocked(
+            "git status\ngit reset --hard",
+            "git reset --hard",
+        )
+
+    def test_redirection_ampersand_does_not_split_blocked(self) -> None:
+        self._assert_blocked(
+            "echo ok 2>&1 && git reset --hard",
+            "git reset --hard",
+        )
+
+    def test_redirection_ampersand_greater_does_not_split_blocked(self) -> None:
+        self._assert_blocked(
+            "echo ok &>out && git reset --hard",
+            "git reset --hard",
+        )
+
+    def test_sudo_double_dash_wrapper_bypass_blocked(self) -> None:
+        self._assert_blocked(
+            "sudo -- git reset --hard",
+            "git reset --hard",
+        )
+
+    def test_env_unset_equals_wrapper_bypass_blocked(self) -> None:
+        self._assert_blocked(
+            "env --unset=PATH git reset --hard",
+            "git reset --hard",
+        )
+
+    def test_env_unset_attached_wrapper_bypass_blocked(self) -> None:
+        self._assert_blocked(
+            "env -uPATH git reset --hard",
+            "git reset --hard",
+        )
+
+    def test_env_C_attached_wrapper_bypass_blocked(self) -> None:
+        self._assert_blocked(
+            "env -C/tmp git reset --hard",
+            "git reset --hard",
+        )
+
+    def test_env_C_separate_wrapper_bypass_blocked(self) -> None:
+        self._assert_blocked(
+            "env -C /tmp git reset --hard",
+            "git reset --hard",
+        )
+
+    def test_env_P_wrapper_bypass_blocked(self) -> None:
+        self._assert_blocked(
+            "env -P /usr/bin git reset --hard",
+            "git reset --hard",
+        )
+
+    def test_env_S_wrapper_bypass_blocked(self) -> None:
+        self._assert_blocked(
+            "env -S 'PATH=/usr/bin' git reset --hard",
+            "git reset --hard",
+        )
+
+    def test_env_dash_breaks_option_scan_still_blocks(self) -> None:
+        self._assert_blocked(
+            "env - git reset --hard",
+            "git reset --hard",
+        )
+
+    def test_command_combined_short_opts_wrapper_bypass_blocked(self) -> None:
+        self._assert_blocked(
+            "command -pv -- git reset --hard",
+            "git reset --hard",
+        )
+
+    def test_command_V_wrapper_bypass_blocked(self) -> None:
+        self._assert_blocked(
+            "command -V git reset --hard",
+            "git reset --hard",
+        )
+
+    def test_command_combined_short_opts_with_V_wrapper_bypass_blocked(self) -> None:
+        self._assert_blocked(
+            "command -pvV -- git reset --hard",
+            "git reset --hard",
+        )
+
+    def test_env_assignments_stripped_blocked(self) -> None:
+        self._assert_blocked(
+            "FOO=1 BAR=2 git reset --hard",
+            "git reset --hard",
+        )
+
+    def test_invalid_env_assignment_key_does_not_strip_still_blocks(self) -> None:
+        self._assert_blocked(
+            "1A=2 git reset --hard",
+            "git reset --hard",
+        )
+
+    def test_invalid_env_assignment_chars_does_not_strip_still_blocks(self) -> None:
+        self._assert_blocked(
+            "A-B=2 git reset --hard",
+            "git reset --hard",
+        )
+
+    def test_empty_env_assignment_key_does_not_strip_still_blocks(self) -> None:
+        self._assert_blocked(
+            "=2 git reset --hard",
+            "git reset --hard",
+        )
+
+    def test_strict_mode_python_one_liner_denies(self) -> None:
+        with mock.patch.dict(os.environ, {"SAFETY_NET_STRICT": "1"}):
+            self._assert_blocked(
+                'python -c "print(\"ok\")"',
+                "interpreter one-liners",
+            )
+
+    def test_strict_mode_bash_lc_without_arg_denies(self) -> None:
+        with mock.patch.dict(os.environ, {"SAFETY_NET_STRICT": "1"}):
+            self._assert_blocked(
+                "bash -lc",
+                "shell -c wrapper",
+            )
+
+    def test_strict_mode_bash_without_dash_c_allowed(self) -> None:
+        with mock.patch.dict(os.environ, {"SAFETY_NET_STRICT": "1"}):
+            self._assert_allowed("bash -l echo ok")
+
+    def test_strict_mode_bash_only_allowed(self) -> None:
+        with mock.patch.dict(os.environ, {"SAFETY_NET_STRICT": "1"}):
+            self._assert_allowed("bash")
+
+    def test_strict_mode_bash_double_dash_does_not_treat_dash_c_as_wrapper_allowed(
+        self,
+    ) -> None:
+        with mock.patch.dict(os.environ, {"SAFETY_NET_STRICT": "1"}):
+            self._assert_allowed("bash -- -c 'echo ok'")
+
+    def test_deny_output_truncates_long_command(self) -> None:
+        long_cmd = "git reset --hard " + ("a" * 400)
+        output = self._run_guard(long_cmd)
+        self.assertIsNotNone(output)
+        assert output is not None
+        reason = output["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertIn("…", reason)
+        self.assertNotIn("a" * 350, reason)
+
+    def test_unparseable_echo_mentions_find_delete_allowed(self) -> None:
+        self._assert_allowed('echo "find . -delete')
+
+    def test_unparseable_rg_mentions_find_delete_allowed(self) -> None:
+        self._assert_allowed('rg "find . -delete')
+
+    def test_strict_mode_python_without_one_liner_allowed(self) -> None:
+        with mock.patch.dict(os.environ, {"SAFETY_NET_STRICT": "1"}):
+            self._assert_allowed("python script.py")
+
+    def test_strict_mode_python_double_dash_does_not_treat_dash_c_as_one_liner_allowed(
+        self,
+    ) -> None:
+        with mock.patch.dict(os.environ, {"SAFETY_NET_STRICT": "1"}):
+            self._assert_allowed("python -- -c 'print(1)'")
+
+    def test_non_strict_unparseable_git_restore_worktree_still_blocked_by_heuristic(
+        self,
+    ) -> None:
+        self._assert_blocked(
+            "git restore --worktree file.txt 'unterminated",
+            "git restore --worktree",
+        )
+
+    def test_non_strict_unparseable_git_stash_clear_still_blocked_by_heuristic(
+        self,
+    ) -> None:
+        self._assert_blocked(
+            "git stash clear 'unterminated",
+            "git stash clear",
+        )
+
+    def test_non_strict_unparseable_git_branch_D_still_blocked_by_heuristic(
+        self,
+    ) -> None:
+        self._assert_blocked(
+            "git branch -D feature 'unterminated",
+            "git branch -D",
+        )
+
+    def test_non_strict_unparseable_git_reset_hard_still_blocked_by_heuristic(
+        self,
+    ) -> None:
+        self._assert_blocked(
+            "git reset --hard 'unterminated",
+            "git reset --hard",
+        )
+
+    def test_non_strict_unparseable_git_reset_merge_still_blocked_by_heuristic(
+        self,
+    ) -> None:
+        self._assert_blocked(
+            "git reset --merge 'unterminated",
+            "git reset --merge",
+        )
+
+    def test_non_strict_unparseable_git_clean_f_still_blocked_by_heuristic(
+        self,
+    ) -> None:
+        self._assert_blocked(
+            "git clean -f 'unterminated",
+            "git clean -f",
+        )
+
+    def test_non_strict_unparseable_git_stash_drop_still_blocked_by_heuristic(
+        self,
+    ) -> None:
+        self._assert_blocked(
+            "git stash drop stash@{0} 'unterminated",
+            "git stash drop",
+        )
+
+    def test_non_strict_unparseable_git_push_force_still_blocked_by_heuristic(
+        self,
+    ) -> None:
+        self._assert_blocked(
+            "git push --force origin main 'unterminated",
+            "Force push",
+        )
+
+    def test_cwd_empty_string_treated_as_unknown(self) -> None:
+        self._assert_blocked("git reset --hard", "git reset --hard", cwd="")
+
+    def test_segment_changes_cwd_regex_fallback_on_unparseable(self) -> None:
+        self.assertTrue(_segment_changes_cwd("cd 'unterminated"))
+
+    def test_shell_split_with_leading_operator_still_blocks(self) -> None:
+        self._assert_blocked("&& git reset --hard", "git reset --hard")
+
+    def test_shell_split_with_leading_pipe_still_blocks(self) -> None:
+        self._assert_blocked("| git reset --hard", "git reset --hard")
+
+    def test_shell_dash_c_recursion_limit_reached_denies(self) -> None:
+        cmd = "rm -rf /some/path"
+        for _ in range(6):
+            cmd = f"bash -c {shlex.quote(cmd)}"
+        self._assert_blocked(cmd, "recursion limit")
+
+    def test_sudo_option_wrapper_bypass_blocked(self) -> None:
+        self._assert_blocked(
+            "sudo -u root -- git reset --hard",
+            "git reset --hard",
+        )
+
+    def test_env_P_attached_wrapper_bypass_blocked(self) -> None:
+        self._assert_blocked(
+            "env -P/usr/bin git reset --hard",
+            "git reset --hard",
+        )
+
+    def test_env_S_attached_wrapper_bypass_blocked(self) -> None:
+        self._assert_blocked(
+            "env -SPATH=/usr/bin git reset --hard",
+            "git reset --hard",
+        )
+
+    def test_env_unknown_option_wrapper_bypass_blocked(self) -> None:
+        self._assert_blocked(
+            "env -i git reset --hard",
+            "git reset --hard",
+        )
+
+    def test_command_unknown_short_opts_not_stripped_still_blocks(self) -> None:
+        self._assert_blocked(
+            "command -px git reset --hard",
+            "git reset --hard",
+        )
+
+    def test_only_env_assignments_allowed(self) -> None:
+        self._assert_allowed("FOO=1")
+
+    def test_shell_split_with_leading_pipe_stderr_operator_still_blocks(self) -> None:
+        self._assert_blocked("|& git reset --hard", "git reset --hard")
+
+    def test_shell_split_with_leading_background_operator_still_blocks(self) -> None:
+        self._assert_blocked("& git reset --hard", "git reset --hard")
+
+    def test_shell_split_with_trailing_separator_ignored_allowed(self) -> None:
+        self._assert_allowed("git status;")
