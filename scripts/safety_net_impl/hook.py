@@ -22,6 +22,85 @@ _MAX_RECURSION_DEPTH = 5
 
 _STRICT_SUFFIX = " [strict mode - disable with: unset SAFETY_NET_STRICT]"
 
+_REASON_FIND_DELETE = (
+    "find -delete permanently deletes matched files. Use -print first."
+)
+
+
+def _strip_token_wrappers(token: str) -> str:
+    """Strip common shell wrapper punctuation from a token.
+
+    Intentionally does not strip `;` so callers can still recognize terminators
+    like `-exec ... \\;`.
+    """
+
+    tok = token.strip()
+    while tok.startswith("$("):
+        tok = tok[2:]
+    tok = tok.lstrip("\\`({[")
+    tok = tok.rstrip("`)}]")
+    return tok
+
+
+def _find_has_delete(args: list[str]) -> bool:
+    """Return True if `find` args include the destructive `-delete` primary.
+
+    This is a best-effort scan that avoids common false-positives where "-delete"
+    is merely an argument (e.g. `-name -delete`) or appears inside `-exec`.
+    """
+
+    # Predicates/actions that consume exactly one argument.
+    consumes_one = {
+        "-name",
+        "-iname",
+        "-path",
+        "-ipath",
+        "-wholename",
+        "-iwholename",
+        "-regex",
+        "-iregex",
+        "-lname",
+        "-ilname",
+        "-samefile",
+        "-newer",
+        "-newerxy",
+        "-perm",
+        "-user",
+        "-group",
+        "-printf",
+        "-fprintf",
+        "-fprint",
+        "-fprint0",
+        "-fls",
+    }
+
+    exec_like = {"-exec", "-execdir", "-ok", "-okdir"}
+
+    i = 0
+    while i < len(args):
+        tok = _strip_token_wrappers(args[i]).lower()
+
+        if tok in exec_like:
+            i += 1
+            while i < len(args):
+                end = _strip_token_wrappers(args[i])
+                if end in {";", "+"}:
+                    i += 1
+                    break
+                i += 1
+            continue
+
+        if tok in consumes_one:
+            i += 2
+            continue
+
+        if tok == "-delete":
+            return True
+
+        i += 1
+
+    return False
+
 
 def _strict_mode() -> bool:
     val = (getenv("SAFETY_NET_STRICT") or "").strip().lower()
@@ -29,11 +108,9 @@ def _strict_mode() -> bool:
 
 
 def _normalize_cmd_token(token: str) -> str:
-    tok = token.strip().lower()
-    while tok.startswith("$("):
-        tok = tok[2:]
-    tok = tok.lstrip("\\`({[")
-    tok = tok.rstrip("`)}];")
+    tok = _strip_token_wrappers(token)
+    tok = tok.rstrip(";")
+    tok = tok.lower()
     tok = posixpath.basename(tok)
     return tok
 
@@ -171,6 +248,18 @@ def _dangerous_in_text(text: str) -> str | None:
     return None
 
 
+def _dangerous_find_delete_in_text(text: str) -> str | None:
+    """Best-effort detection for `find -delete` when token parsing is unavailable."""
+
+    t = text.lower()
+    stripped = t.lstrip()
+    if stripped.startswith(("echo ", "rg ")):
+        return None
+    if re.search(r"\bfind\b[^\n;|&]*\s-delete\b", t):
+        return _REASON_FIND_DELETE
+    return None
+
+
 def _analyze_segment(
     segment: str,
     *,
@@ -182,7 +271,7 @@ def _analyze_segment(
     if tokens is None:
         if strict:
             return segment, "Unable to parse shell command safely." + _STRICT_SUFFIX
-        reason = _dangerous_in_text(segment)
+        reason = _dangerous_in_text(segment) or _dangerous_find_delete_in_text(segment)
         return (segment, reason) if reason else None
     if not tokens:
         return None
@@ -214,7 +303,7 @@ def _analyze_segment(
     if head in {"python", "python3", "node", "ruby", "perl"}:
         code = _extract_pythonish_code_arg(tokens)
         if code is not None:
-            reason = _dangerous_in_text(code)
+            reason = _dangerous_in_text(code) or _dangerous_find_delete_in_text(code)
             if reason:
                 return segment, reason
             if strict:
@@ -235,6 +324,9 @@ def _analyze_segment(
                 strict=strict,
             )
             return (segment, reason) if reason else None
+        if applet == "find":
+            if _find_has_delete(tokens[2:]):
+                return segment, _REASON_FIND_DELETE
 
     if head == "git":
         reason = _analyze_git(["git", *tokens[1:]])
@@ -247,6 +339,10 @@ def _analyze_segment(
             strict=strict,
         )
         return (segment, reason) if reason else None
+
+    if head == "find":
+        if _find_has_delete(tokens[1:]):
+            return segment, _REASON_FIND_DELETE
 
     # Detect embedded destructive commands (e.g. $(rm -rf ...), `git reset --hard`).
     for i in range(1, len(tokens)):
@@ -264,6 +360,9 @@ def _analyze_segment(
             reason = _analyze_git(["git", *tokens[i + 1 :]])
             if reason:
                 return segment, reason
+        if cmd == "find":
+            if _find_has_delete(tokens[i + 1 :]):
+                return segment, _REASON_FIND_DELETE
 
     reason = _dangerous_in_text(segment)
     return (segment, reason) if reason else None
