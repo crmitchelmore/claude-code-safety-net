@@ -21,6 +21,34 @@ class GitCheckoutTests(SafetyNetTestCase):
     def test_git_checkout_orphan_allowed(self) -> None:
         self._assert_allowed("git checkout --orphan orphan-branch")
 
+    # git checkout <ref> <pathspec> (without "--")
+    def test_git_checkout_ref_pathspec_blocked(self) -> None:
+        self._assert_blocked(
+            "git checkout HEAD file.txt",
+            "git checkout <ref> <path>",
+        )
+
+    def test_git_checkout_ref_multiple_pathspecs_blocked(self) -> None:
+        self._assert_blocked(
+            "git checkout main a.txt b.txt",
+            "git checkout <ref> <path>",
+        )
+
+    def test_git_checkout_branch_only_allowed(self) -> None:
+        self._assert_allowed("git checkout main")
+
+    def test_git_checkout_ref_pathspec_from_file_equals_blocked(self) -> None:
+        self._assert_blocked(
+            "git checkout HEAD --pathspec-from-file=paths.txt",
+            "git checkout --pathspec-from-file",
+        )
+
+    def test_git_checkout_ref_pathspec_from_file_arg_blocked(self) -> None:
+        self._assert_blocked(
+            "git checkout HEAD --pathspec-from-file paths.txt",
+            "git checkout --pathspec-from-file",
+        )
+
 
 class GitRestoreTests(SafetyNetTestCase):
     # git restore (discards uncommitted changes)
