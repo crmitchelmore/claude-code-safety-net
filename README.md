@@ -82,7 +82,7 @@ When a destructive command is detected, the plugin blocks the tool execution and
 
 Example output:
 ```text
-BLOCKED by safety_net.py
+BLOCKED by Safety Net
 
 Reason: git checkout -- discards uncommitted changes permanently. Use 'git stash' first.
 

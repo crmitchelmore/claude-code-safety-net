@@ -192,7 +192,7 @@ Blocked commands produce JSON:
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "deny",
-    "permissionDecisionReason": "BLOCKED by safety_net.py\n\nReason: ..."
+    "permissionDecisionReason": "BLOCKED by Safety Net\n\nReason: ..."
   }
 }
 ```

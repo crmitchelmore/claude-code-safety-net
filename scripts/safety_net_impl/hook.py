@@ -1009,7 +1009,7 @@ def main() -> int:
                         "hookEventName": "PreToolUse",
                         "permissionDecision": "deny",
                         "permissionDecisionReason": (
-                            "BLOCKED by safety_net.py\n\nReason: Invalid hook input."
+                            "BLOCKED by Safety Net\n\nReason: Invalid hook input."
                         ),
                     }
                 }
@@ -1027,7 +1027,7 @@ def main() -> int:
                         "hookEventName": "PreToolUse",
                         "permissionDecision": "deny",
                         "permissionDecisionReason": (
-                            "BLOCKED by safety_net.py\n\n"
+                            "BLOCKED by Safety Net\n\n"
                             "Reason: Invalid hook input structure."
                         ),
                     }
@@ -1051,7 +1051,7 @@ def main() -> int:
                         "hookEventName": "PreToolUse",
                         "permissionDecision": "deny",
                         "permissionDecisionReason": (
-                            "BLOCKED by safety_net.py\n\n"
+                            "BLOCKED by Safety Net\n\n"
                             "Reason: Invalid hook input structure."
                         ),
                     }
@@ -1084,7 +1084,7 @@ def main() -> int:
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "deny",
                 "permissionDecisionReason": (
-                    "BLOCKED by safety_net.py\n\n"
+                    "BLOCKED by Safety Net\n\n"
                     f"Reason: {reason}\n\n"
                     + _format_safe_excerpt("Command", command)
                     + _format_safe_excerpt("Segment", segment)
