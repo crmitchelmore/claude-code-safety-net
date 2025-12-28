@@ -993,6 +993,55 @@ def _segment_changes_cwd(segment: str) -> bool:
     )
 
 
+def _sanitize_session_id_for_filename(session_id: str) -> str | None:
+    """Return a safe filename component derived from session_id."""
+
+    raw = session_id.strip()
+    if not raw:
+        return None
+
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", raw)
+    safe = safe.strip("._-")[:128]
+    if not safe or safe in {".", ".."}:
+        return None
+    return safe
+
+
+def _write_audit_log(
+    session_id: str,
+    command: str,
+    segment: str,
+    reason: str,
+    cwd: str | None,
+) -> None:
+    """Write an audit log entry for a denied command."""
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    logs_dir = Path.home() / ".cc-safety-net" / "logs"
+
+    safe_session_id = _sanitize_session_id_for_filename(session_id)
+    if safe_session_id is None:
+        return
+
+    try:
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        log_file = logs_dir / f"{safe_session_id}.jsonl"
+
+        entry = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "command": _redact_secrets(command)[:300],
+            "segment": _redact_secrets(segment)[:300],
+            "reason": reason,
+            "cwd": cwd,
+        }
+
+        with log_file.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+    except OSError:
+        pass
+
+
 def main() -> int:
     strict = _strict_mode()
     paranoid_rm = _paranoid_rm_mode()
@@ -1079,6 +1128,11 @@ def main() -> int:
     )
     if analyzed:
         segment, reason = analyzed
+
+        session_id = input_data.get("session_id")
+        if isinstance(session_id, str) and session_id:
+            _write_audit_log(session_id, command, segment, reason, cwd)
+
         output = {
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
