@@ -353,6 +353,33 @@ class EdgeCasesTests(SafetyNetTestCase):
     def test_xargs_echo_allowed(self) -> None:
         self._assert_allowed("echo ok | xargs echo")
 
+    def test_xargs_busybox_rm_rf_blocked(self) -> None:
+        self._assert_blocked(
+            "echo / | xargs busybox rm -rf",
+            "rm -rf",
+        )
+
+    def test_xargs_busybox_find_delete_blocked(self) -> None:
+        self._assert_blocked(
+            "echo ok | xargs busybox find . -delete",
+            "find -delete",
+        )
+
+    def test_xargs_without_child_command_allowed(self) -> None:
+        self._assert_allowed("echo ok | xargs")
+
+    def test_xargs_find_delete_blocked(self) -> None:
+        self._assert_blocked(
+            "echo ok | xargs find . -delete",
+            "find -delete",
+        )
+
+    def test_xargs_git_reset_hard_blocked(self) -> None:
+        self._assert_blocked(
+            "echo ok | xargs git reset --hard",
+            "git reset --hard",
+        )
+
     def test_parallel_bash_c_dynamic_denied(self) -> None:
         self._assert_blocked(
             "parallel bash -c ::: 'rm -rf /'",
@@ -378,10 +405,28 @@ class EdgeCasesTests(SafetyNetTestCase):
             "rm -rf",
         )
 
+    def test_parallel_busybox_stdin_mode_blocks_rm_rf(self) -> None:
+        self._assert_blocked(
+            "echo / | parallel busybox rm -rf",
+            "rm -rf",
+        )
+
+    def test_parallel_bash_c_stdin_mode_blocks_rm_rf_placeholder(self) -> None:
+        self._assert_blocked(
+            "echo / | parallel bash -c 'rm -rf {}'",
+            "rm -rf",
+        )
+
     def test_parallel_commands_mode_blocks_rm_rf(self) -> None:
         self._assert_blocked(
             "parallel ::: 'rm -rf /'",
             "rm -rf",
+        )
+
+    def test_parallel_rm_rf_args_after_marker_without_placeholder_blocked(self) -> None:
+        self._assert_blocked(
+            "parallel rm -rf ::: /",
+            "root or home",
         )
 
     def test_parallel_rm_rf_with_replacement_args_analyzed(self) -> None:
@@ -422,6 +467,12 @@ class EdgeCasesTests(SafetyNetTestCase):
             "parallel busybox rm -rf {} ::: build",
             cwd=str(self.tmpdir),
         )
+
+    def test_parallel_stdin_without_template_allowed(self) -> None:
+        self._assert_allowed("echo ok | parallel")
+
+    def test_parallel_marker_without_template_allowed(self) -> None:
+        self._assert_allowed("parallel :::")
 
     def test_or_operator_split_blocked(self) -> None:
         self._assert_blocked(
@@ -589,6 +640,24 @@ class EdgeCasesTests(SafetyNetTestCase):
     def test_strict_mode_python_without_one_liner_allowed(self) -> None:
         with mock.patch.dict(os.environ, {"SAFETY_NET_STRICT": "1"}):
             self._assert_allowed("python script.py")
+
+    def test_node_e_dangerous_blocked(self) -> None:
+        self._assert_blocked('node -e "rm -rf /"', "rm -rf")
+
+    def test_node_e_safe_allowed(self) -> None:
+        self._assert_allowed('node -e "console.log(\"ok\")"')
+
+    def test_ruby_e_dangerous_blocked(self) -> None:
+        self._assert_blocked('ruby -e "rm -rf /"', "rm -rf")
+
+    def test_ruby_e_safe_allowed(self) -> None:
+        self._assert_allowed("ruby -e \"puts 'ok'\"")
+
+    def test_perl_e_dangerous_blocked(self) -> None:
+        self._assert_blocked("perl -e \"rm -rf /\"", "rm -rf")
+
+    def test_perl_e_safe_allowed(self) -> None:
+        self._assert_allowed("perl -e \"print 'ok'\"")
 
     def test_strict_mode_python_double_dash_does_not_treat_dash_c_as_one_liner_allowed(
         self,
