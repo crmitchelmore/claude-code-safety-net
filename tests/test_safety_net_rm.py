@@ -11,6 +11,12 @@ class RmRfBlockedTests(SafetyNetTestCase):
     def test_rm_rf_blocked(self) -> None:
         self._assert_blocked("rm -rf /some/path", "rm -rf")
 
+    def test_rm_Rf_blocked(self) -> None:
+        self._assert_blocked("rm -Rf /some/path", "rm -rf")
+
+    def test_rm_R_f_blocked(self) -> None:
+        self._assert_blocked("rm -R -f /some/path", "rm -rf")
+
     def test_rm_rf_home_blocked(self) -> None:
         self._assert_blocked("rm -rf ~/projects", "rm -rf")
 
@@ -28,6 +34,9 @@ class RmRfBlockedTests(SafetyNetTestCase):
 
     def test_rm_rf_busybox_blocked(self) -> None:
         self._assert_blocked("busybox rm -rf /some/path", "rm -rf")
+
+    def test_rm_R_f_busybox_blocked(self) -> None:
+        self._assert_blocked("busybox rm -R -f /some/path", "rm -rf")
 
     def test_rm_rf_bash_c_blocked(self) -> None:
         self._assert_blocked("bash -c 'rm -rf /some/path'", "rm -rf")
@@ -109,6 +118,9 @@ class RmRfAllowedTests(SafetyNetTestCase):
 
     def test_rm_r_without_force_allowed(self) -> None:
         self._assert_allowed("rm -r /some/path")
+
+    def test_rm_R_without_force_allowed(self) -> None:
+        self._assert_allowed("rm -R /some/path")
 
     def test_rm_f_without_recursive_allowed(self) -> None:
         self._assert_allowed("rm -f /some/path")
