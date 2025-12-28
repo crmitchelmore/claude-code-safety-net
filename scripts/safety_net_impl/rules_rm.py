@@ -18,10 +18,17 @@ def _analyze_rm(
     strict: bool = False,
 ) -> str | None:
     rest = tokens[1:]
-    rest_lower = [t.lower() for t in rest]
-    short = _short_opts(rest)
-    recursive = "--recursive" in rest_lower or "r" in short
-    force = "--force" in rest_lower or "f" in short
+
+    opts: list[str] = []
+    for tok in rest:
+        if tok == "--":
+            break
+        opts.append(tok)
+
+    opts_lower = [t.lower() for t in opts]
+    short = _short_opts(opts)
+    recursive = "--recursive" in opts_lower or "r" in short or "R" in short
+    force = "--force" in opts_lower or "f" in short
 
     if not (recursive and force):
         return None
