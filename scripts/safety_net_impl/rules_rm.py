@@ -38,6 +38,11 @@ def _analyze_rm(
     targets = _rm_targets(tokens)
     if any(_is_root_or_home_path(t) for t in targets):
         return _REASON_RM_RF_ROOT_HOME
+
+    # Block deleting cwd itself, even if it's a temp path
+    if cwd and any(_is_cwd_itself(t, cwd) for t in targets):
+        return _REASON_RM_RF
+
     if targets and all(
         _is_temp_path(t, allow_tmpdir_var=allow_tmpdir_var) for t in targets
     ):
@@ -53,6 +58,20 @@ def _analyze_rm(
         if all(_is_path_within_cwd(t, cwd) for t in targets):
             return None
     return _REASON_RM_RF
+
+
+def _is_cwd_itself(path: str, cwd: str) -> bool:
+    """Return True if `path` resolves to the cwd itself (not a subdirectory)."""
+    normalized = posixpath.normpath(path)
+    if normalized in {".", ""}:
+        return True
+
+    if path.startswith("/"):
+        resolved = posixpath.normpath(path)
+    else:
+        resolved = posixpath.normpath(posixpath.join(cwd, path))
+
+    return resolved == posixpath.normpath(cwd)
 
 
 def _is_path_within_cwd(path: str, cwd: str) -> bool:
