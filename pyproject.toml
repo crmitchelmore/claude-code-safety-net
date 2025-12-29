@@ -1,6 +1,6 @@
 [project]
 name = "safety-net"
-version = "0.1.0"
+version = "0.2.0"
 description = "Block destructive git and filesystem commands in Claude Code"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -30,7 +30,19 @@ select = ["E", "F", "I", "B", "UP"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = "-v"
+addopts = "-v --cov=scripts --cov-report=term-missing"
+
+[tool.coverage.run]
+branch = true
+source = ["scripts"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+]
+show_missing = true
 
 [dependency-groups]
 dev = [
@@ -40,6 +52,7 @@ dev = [
     "mypy>=1.19.1",
     "vulture>=2.14",
     "commitizen>=4.10.1",
+    "pytest-cov>=7.0.0",
 ]
 
 [tool.mypy]
@@ -62,6 +75,7 @@ exclude = [".venv", "venv"]
 [tool.commitizen]
 name = "cz_conventional_commits"
 tag_format = "v$version"
+annotated_tag = true
 version_scheme = "pep440"
 version_provider = "pep621"
 update_changelog_on_bump = true

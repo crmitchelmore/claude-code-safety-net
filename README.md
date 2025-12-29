@@ -57,8 +57,14 @@ This hook provides **semantic command analysis**: it parses arguments, understan
 | git branch -D | Force-deletes branch without merge check |
 | git stash drop | Permanently deletes stashed changes |
 | git stash clear | Deletes ALL stashed changes |
+| git worktree remove --force | Force-deletes worktree without checking for changes |
 | rm -rf (paths outside cwd) | Recursive file deletion outside the current directory |
 | rm -rf / or ~ or $HOME | Root/home deletion is extremely dangerous |
+| find ... -delete | Permanently removes files matching criteria |
+| xargs rm -rf | Dynamic input makes targets unpredictable |
+| xargs \<shell\> -c | Can execute arbitrary commands |
+| parallel rm -rf | Dynamic input makes targets unpredictable |
+| parallel \<shell\> -c | Can execute arbitrary commands |
 
 ## Commands Allowed
 
@@ -82,7 +88,7 @@ When a destructive command is detected, the plugin blocks the tool execution and
 
 Example output:
 ```text
-BLOCKED by safety_net.py
+BLOCKED by Safety Net
 
 Reason: git checkout -- discards uncommitted changes permanently. Use 'git stash' first.
 
@@ -143,8 +149,11 @@ scripts/
     shell.py             # Shell parsing utilities
 tests/
   safety_net_test_base.py
+  test_safety_net_audit.py
   test_safety_net_edge.py
+  test_safety_net_find.py
   test_safety_net_git.py
+  test_safety_net_parsing_helpers.py
   test_safety_net_rm.py
 ```
 
@@ -152,13 +161,33 @@ tests/
 
 ### Strict Mode
 
-By default, unparseable commands are allowed through, and `rm -rf` is allowed only for temp
-paths and paths within the current working directory. Enable strict mode to additionally
-block unparseable commands and block non-temp `rm -rf`:
+By default, unparseable commands are allowed through. Enable strict mode to fail-closed
+when the hook input or shell command cannot be safely analyzed (e.g., invalid JSON,
+unterminated quotes, malformed `bash -c` wrappers):
 
 ```bash
 export SAFETY_NET_STRICT=1
 ```
+
+### Paranoid Mode
+
+Paranoid mode enables stricter safety checks that may be disruptive to normal workflows.
+You can enable it globally or via focused toggles:
+
+```bash
+# Enable all paranoid checks
+export SAFETY_NET_PARANOID=1
+
+# Or enable specific paranoid checks
+export SAFETY_NET_PARANOID_RM=1
+export SAFETY_NET_PARANOID_INTERPRETERS=1
+```
+
+Paranoid behavior:
+
+- **rm**: blocks non-temp `rm -rf` even within the current working directory.
+- **interpreters**: blocks interpreter one-liners like `python -c`, `node -e`, `ruby -e`,
+  and `perl -e` (these can hide destructive commands).
 
 ### Shell Wrapper Detection
 
@@ -180,6 +209,16 @@ python -c 'import os; os.system("rm -rf /")'  # Blocked
 ### Secret Redaction
 
 Block messages automatically redact sensitive data (tokens, passwords, API keys) to prevent leaking secrets in logs.
+
+### Audit Logging
+
+All blocked commands are logged to `~/.cc-safety-net/logs/<session_id>.jsonl` for audit purposes:
+
+```json
+{"ts": "2025-01-15T10:30:00Z", "command": "git reset --hard", "segment": "git reset --hard", "reason": "...", "cwd": "/path/to/project"}
+```
+
+Sensitive data in log entries is automatically redacted.
 
 ## License
 

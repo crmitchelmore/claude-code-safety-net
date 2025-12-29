@@ -11,11 +11,11 @@ check:
     uv run mypy .
     # Run dead code detection
     uv run vulture
-    # Run tests
-    uv run pytest
+    # Run tests with coverage report
+    uv run pytest --cov=scripts --cov-report=json --cov-report=term-missing
 
 # Bump version and generate changelog
 bump:
     uv run cz bump
-    git push --follow-tags
+    git push -u origin HEAD --follow-tags
     gh release create $(git describe --tags --abbrev=0) --notes "$(uv run cz changelog $(git describe --tags --abbrev=0) --dry-run)"

@@ -7,7 +7,9 @@ from .shell import _short_opts
 
 _REASON_RM_RF = "rm -rf is destructive. List files first, then delete individually."
 _REASON_RM_RF_ROOT_HOME = "rm -rf on root or home paths is extremely dangerous."
-_STRICT_SUFFIX = " [strict mode - disable with: unset SAFETY_NET_STRICT]"
+_PARANOID_SUFFIX = (
+    " [paranoid mode - disable with: unset SAFETY_NET_PARANOID SAFETY_NET_PARANOID_RM]"
+)
 
 
 def _analyze_rm(
@@ -15,13 +17,20 @@ def _analyze_rm(
     *,
     allow_tmpdir_var: bool = True,
     cwd: str | None = None,
-    strict: bool = False,
+    paranoid: bool = False,
 ) -> str | None:
     rest = tokens[1:]
-    rest_lower = [t.lower() for t in rest]
-    short = _short_opts(rest)
-    recursive = "--recursive" in rest_lower or "r" in short
-    force = "--force" in rest_lower or "f" in short
+
+    opts: list[str] = []
+    for tok in rest:
+        if tok == "--":
+            break
+        opts.append(tok)
+
+    opts_lower = [t.lower() for t in opts]
+    short = _short_opts(opts)
+    recursive = "--recursive" in opts_lower or "r" in short or "R" in short
+    force = "--force" in opts_lower or "f" in short
 
     if not (recursive and force):
         return None
@@ -29,13 +38,18 @@ def _analyze_rm(
     targets = _rm_targets(tokens)
     if any(_is_root_or_home_path(t) for t in targets):
         return _REASON_RM_RF_ROOT_HOME
+
+    # Block deleting cwd itself, even if it's a temp path
+    if cwd and any(_is_cwd_itself(t, cwd) for t in targets):
+        return _REASON_RM_RF
+
     if targets and all(
         _is_temp_path(t, allow_tmpdir_var=allow_tmpdir_var) for t in targets
     ):
         return None
 
-    if strict:
-        return _REASON_RM_RF + _STRICT_SUFFIX
+    if paranoid:
+        return _REASON_RM_RF + _PARANOID_SUFFIX
 
     if cwd and targets:
         home = os.environ.get("HOME")
@@ -44,6 +58,20 @@ def _analyze_rm(
         if all(_is_path_within_cwd(t, cwd) for t in targets):
             return None
     return _REASON_RM_RF
+
+
+def _is_cwd_itself(path: str, cwd: str) -> bool:
+    """Return True if `path` resolves to the cwd itself (not a subdirectory)."""
+    normalized = posixpath.normpath(path)
+    if normalized in {".", ""}:
+        return True
+
+    if path.startswith("/"):
+        resolved = posixpath.normpath(path)
+    else:
+        resolved = posixpath.normpath(posixpath.join(cwd, path))
+
+    return resolved == posixpath.normpath(cwd)
 
 
 def _is_path_within_cwd(path: str, cwd: str) -> bool:
