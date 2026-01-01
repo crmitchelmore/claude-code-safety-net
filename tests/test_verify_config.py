@@ -1,60 +1,14 @@
 """Tests for verify_config.py script."""
 
 import json
-import sys
 from io import StringIO
 from pathlib import Path
 from unittest import mock
 
 import scripts.verify_config as verify_config_module
-from scripts.verify_config import _print_errors, main
+from scripts.verify_config import main
 
 from . import TempDirTestCase
-
-
-class TestPrintErrors(TempDirTestCase):
-    """Tests for _print_errors function."""
-
-    def test_prints_scope_and_path(self) -> None:
-        stderr = StringIO()
-        with mock.patch.object(sys, "stderr", stderr):
-            _print_errors("User", Path("/home/user/.config/test.json"), ["error1"])
-        output = stderr.getvalue()
-        self.assertIn("User config:", output)
-        self.assertIn("/home/user/.config/test.json", output)
-
-    def test_prints_separator_line(self) -> None:
-        stderr = StringIO()
-        with mock.patch.object(sys, "stderr", stderr):
-            _print_errors("Project", Path("/test.json"), ["error1"])
-        output = stderr.getvalue()
-        self.assertIn("-" * 60, output)
-
-    def test_prints_error_with_checkmark(self) -> None:
-        stderr = StringIO()
-        with mock.patch.object(sys, "stderr", stderr):
-            _print_errors("User", Path("/test.json"), ["missing field 'version'"])
-        output = stderr.getvalue()
-        self.assertIn("✗ missing field 'version'", output)
-
-    def test_prints_multiple_errors(self) -> None:
-        stderr = StringIO()
-        with mock.patch.object(sys, "stderr", stderr):
-            _print_errors("User", Path("/test.json"), ["error1", "error2", "error3"])
-        output = stderr.getvalue()
-        self.assertIn("✗ error1", output)
-        self.assertIn("✗ error2", output)
-        self.assertIn("✗ error3", output)
-
-    def test_splits_semicolon_joined_errors(self) -> None:
-        stderr = StringIO()
-        with mock.patch.object(sys, "stderr", stderr):
-            _print_errors("User", Path("/test.json"), ["error1; error2; error3"])
-        output = stderr.getvalue()
-        self.assertIn("✗ error1", output)
-        self.assertIn("✗ error2", output)
-        self.assertIn("✗ error3", output)
-        self.assertNotIn("; ", output.split("✗")[1])
 
 
 class TestMainNoConfigs(TempDirTestCase):
@@ -66,7 +20,6 @@ class TestMainNoConfigs(TempDirTestCase):
         import os
 
         os.chdir(self.tmpdir)
-        # Mock _USER_CONFIG to point to non-existent path in tmpdir
         self._user_config_path = self.tmpdir / ".cc-safety-net" / "config.json"
         self._patcher = mock.patch.object(
             verify_config_module, "_USER_CONFIG", self._user_config_path
@@ -84,9 +37,23 @@ class TestMainNoConfigs(TempDirTestCase):
         result = main()
         self.assertEqual(result, 0)
 
+    def test_no_configs_prints_header(self) -> None:
+        stdout = StringIO()
+        with mock.patch(
+            "builtins.print",
+            side_effect=lambda *a, **_: stdout.write(str(a[0]) + "\n") if a else None,
+        ):
+            main()
+        output = stdout.getvalue()
+        self.assertIn("Safety Net Config", output)
+        self.assertIn("═", output)
+
     def test_no_configs_prints_message(self) -> None:
         stdout = StringIO()
-        with mock.patch.object(sys, "stdout", stdout):
+        with mock.patch(
+            "builtins.print",
+            side_effect=lambda *a, **_: stdout.write(str(a[0]) + "\n") if a else None,
+        ):
             main()
         output = stdout.getvalue()
         self.assertIn("No config files found", output)
@@ -104,13 +71,21 @@ class TestMainValidConfigs(TempDirTestCase):
         path = Path(".safety-net.json")
         path.write_text(json.dumps(data), encoding="utf-8")
 
+    def _capture_output(self) -> str:
+        stdout = StringIO()
+        with mock.patch(
+            "builtins.print",
+            side_effect=lambda *a, **_: stdout.write(str(a[0]) + "\n") if a else None,
+        ):
+            main()
+        return stdout.getvalue()
+
     def setUp(self) -> None:
         super().setUp()
         self._original_cwd = Path.cwd()
         import os
 
         os.chdir(self.tmpdir)
-        # Mock _USER_CONFIG to point to tmpdir
         self._user_config_path = self.tmpdir / ".cc-safety-net" / "config.json"
         self._patcher = mock.patch.object(
             verify_config_module, "_USER_CONFIG", self._user_config_path
@@ -129,28 +104,50 @@ class TestMainValidConfigs(TempDirTestCase):
         result = main()
         self.assertEqual(result, 0)
 
-    def test_user_config_only_prints_success(self) -> None:
+    def test_user_config_prints_checkmark(self) -> None:
         self._write_user_config({"version": 1})
-        stdout = StringIO()
-        with mock.patch.object(sys, "stdout", stdout):
-            main()
-        output = stdout.getvalue()
-        self.assertIn("Config OK", output)
-        self.assertIn("user", output)
+        output = self._capture_output()
+        self.assertIn("✓ User config:", output)
+
+    def test_user_config_shows_rules_none(self) -> None:
+        self._write_user_config({"version": 1})
+        output = self._capture_output()
+        self.assertIn("Rules: (none)", output)
+
+    def test_user_config_with_rules_shows_numbered_list(self) -> None:
+        self._write_user_config(
+            {
+                "version": 1,
+                "rules": [
+                    {
+                        "name": "block-foo",
+                        "command": "foo",
+                        "block_args": ["-x"],
+                        "reason": "Blocked",
+                    },
+                    {
+                        "name": "block-bar",
+                        "command": "bar",
+                        "block_args": ["-y"],
+                        "reason": "Blocked",
+                    },
+                ],
+            }
+        )
+        output = self._capture_output()
+        self.assertIn("Rules:", output)
+        self.assertIn("1. block-foo", output)
+        self.assertIn("2. block-bar", output)
 
     def test_project_config_only_returns_zero(self) -> None:
         self._write_project_config({"version": 1})
         result = main()
         self.assertEqual(result, 0)
 
-    def test_project_config_only_prints_success(self) -> None:
+    def test_project_config_prints_checkmark(self) -> None:
         self._write_project_config({"version": 1})
-        stdout = StringIO()
-        with mock.patch.object(sys, "stdout", stdout):
-            main()
-        output = stdout.getvalue()
-        self.assertIn("Config OK", output)
-        self.assertIn("project", output)
+        output = self._capture_output()
+        self.assertIn("✓ Project config:", output)
 
     def test_both_configs_returns_zero(self) -> None:
         self._write_user_config({"version": 1})
@@ -158,16 +155,17 @@ class TestMainValidConfigs(TempDirTestCase):
         result = main()
         self.assertEqual(result, 0)
 
-    def test_both_configs_prints_both_scopes(self) -> None:
+    def test_both_configs_prints_both_checkmarks(self) -> None:
         self._write_user_config({"version": 1})
         self._write_project_config({"version": 1})
-        stdout = StringIO()
-        with mock.patch.object(sys, "stdout", stdout):
-            main()
-        output = stdout.getvalue()
-        self.assertIn("Config OK", output)
-        self.assertIn("user", output)
-        self.assertIn("project", output)
+        output = self._capture_output()
+        self.assertIn("✓ User config:", output)
+        self.assertIn("✓ Project config:", output)
+
+    def test_valid_config_prints_success_message(self) -> None:
+        self._write_project_config({"version": 1})
+        output = self._capture_output()
+        self.assertIn("All configs valid.", output)
 
 
 class TestMainInvalidConfigs(TempDirTestCase):
@@ -181,13 +179,18 @@ class TestMainInvalidConfigs(TempDirTestCase):
         path = Path(".safety-net.json")
         path.write_text(content, encoding="utf-8")
 
+    def _capture_stderr(self) -> str:
+        stderr = StringIO()
+        with mock.patch("sys.stderr", stderr):
+            main()
+        return stderr.getvalue()
+
     def setUp(self) -> None:
         super().setUp()
         self._original_cwd = Path.cwd()
         import os
 
         os.chdir(self.tmpdir)
-        # Mock _USER_CONFIG to point to tmpdir
         self._user_config_path = self.tmpdir / ".cc-safety-net" / "config.json"
         self._patcher = mock.patch.object(
             verify_config_module, "_USER_CONFIG", self._user_config_path
@@ -206,13 +209,16 @@ class TestMainInvalidConfigs(TempDirTestCase):
         result = main()
         self.assertEqual(result, 1)
 
-    def test_invalid_user_config_prints_errors(self) -> None:
+    def test_invalid_user_config_prints_x_mark(self) -> None:
         self._write_user_config('{"version": 2}')
-        stderr = StringIO()
-        with mock.patch.object(sys, "stderr", stderr):
-            main()
-        output = stderr.getvalue()
-        self.assertIn("User config:", output)
+        output = self._capture_stderr()
+        self.assertIn("✗ User config:", output)
+
+    def test_invalid_config_shows_numbered_errors(self) -> None:
+        self._write_user_config('{"version": 2}')
+        output = self._capture_stderr()
+        self.assertIn("Errors:", output)
+        self.assertIn("1.", output)
         self.assertIn("unsupported version", output)
 
     def test_invalid_project_config_returns_one(self) -> None:
@@ -220,14 +226,10 @@ class TestMainInvalidConfigs(TempDirTestCase):
         result = main()
         self.assertEqual(result, 1)
 
-    def test_invalid_project_config_prints_errors(self) -> None:
+    def test_invalid_project_config_prints_x_mark(self) -> None:
         self._write_project_config('{"rules": []}')
-        stderr = StringIO()
-        with mock.patch.object(sys, "stderr", stderr):
-            main()
-        output = stderr.getvalue()
-        self.assertIn("Project config:", output)
-        self.assertIn("version", output)
+        output = self._capture_stderr()
+        self.assertIn("✗ Project config:", output)
 
     def test_both_invalid_returns_one(self) -> None:
         self._write_user_config('{"version": 2}')
@@ -238,29 +240,19 @@ class TestMainInvalidConfigs(TempDirTestCase):
     def test_both_invalid_prints_both_errors(self) -> None:
         self._write_user_config('{"version": 2}')
         self._write_project_config('{"rules": []}')
-        stderr = StringIO()
-        with mock.patch.object(sys, "stderr", stderr):
-            main()
-        output = stderr.getvalue()
-        self.assertIn("User config:", output)
-        self.assertIn("Project config:", output)
+        output = self._capture_stderr()
+        self.assertIn("✗ User config:", output)
+        self.assertIn("✗ Project config:", output)
 
     def test_invalid_json_prints_error(self) -> None:
         self._write_project_config("{ not valid json }")
-        stderr = StringIO()
-        with mock.patch.object(sys, "stderr", stderr):
-            main()
-        output = stderr.getvalue()
-        self.assertIn("Project config:", output)
-        self.assertIn("✗", output)
+        output = self._capture_stderr()
+        self.assertIn("✗ Project config:", output)
 
     def test_validation_failed_message(self) -> None:
         self._write_project_config('{"version": 2}')
-        stderr = StringIO()
-        with mock.patch.object(sys, "stderr", stderr):
-            main()
-        output = stderr.getvalue()
-        self.assertIn("Config validation failed", output)
+        output = self._capture_stderr()
+        self.assertIn("Config validation failed.", output)
 
 
 class TestMainMixedValidity(TempDirTestCase):
@@ -274,13 +266,19 @@ class TestMainMixedValidity(TempDirTestCase):
         path = Path(".safety-net.json")
         path.write_text(content, encoding="utf-8")
 
+    def _capture_output(self) -> tuple[str, str]:
+        stdout = StringIO()
+        stderr = StringIO()
+        with mock.patch("sys.stdout", stdout), mock.patch("sys.stderr", stderr):
+            main()
+        return stdout.getvalue(), stderr.getvalue()
+
     def setUp(self) -> None:
         super().setUp()
         self._original_cwd = Path.cwd()
         import os
 
         os.chdir(self.tmpdir)
-        # Mock _USER_CONFIG to point to tmpdir
         self._user_config_path = self.tmpdir / ".cc-safety-net" / "config.json"
         self._patcher = mock.patch.object(
             verify_config_module, "_USER_CONFIG", self._user_config_path
@@ -300,15 +298,12 @@ class TestMainMixedValidity(TempDirTestCase):
         result = main()
         self.assertEqual(result, 1)
 
-    def test_valid_user_invalid_project_prints_project_error(self) -> None:
+    def test_valid_user_invalid_project_shows_both(self) -> None:
         self._write_user_config('{"version": 1}')
         self._write_project_config('{"version": 2}')
-        stderr = StringIO()
-        with mock.patch.object(sys, "stderr", stderr):
-            main()
-        output = stderr.getvalue()
-        self.assertIn("Project config:", output)
-        self.assertNotIn("User config:", output)
+        stdout, stderr = self._capture_output()
+        self.assertIn("✓ User config:", stdout)
+        self.assertIn("✗ Project config:", stderr)
 
     def test_invalid_user_valid_project_returns_one(self) -> None:
         self._write_user_config('{"version": 2}')
@@ -316,12 +311,9 @@ class TestMainMixedValidity(TempDirTestCase):
         result = main()
         self.assertEqual(result, 1)
 
-    def test_invalid_user_valid_project_prints_user_error(self) -> None:
+    def test_invalid_user_valid_project_shows_both(self) -> None:
         self._write_user_config('{"version": 2}')
         self._write_project_config('{"version": 1}')
-        stderr = StringIO()
-        with mock.patch.object(sys, "stderr", stderr):
-            main()
-        output = stderr.getvalue()
-        self.assertIn("User config:", output)
-        self.assertNotIn("Project config:", output)
+        stdout, stderr = self._capture_output()
+        self.assertIn("✗ User config:", stderr)
+        self.assertIn("✓ Project config:", stdout)
