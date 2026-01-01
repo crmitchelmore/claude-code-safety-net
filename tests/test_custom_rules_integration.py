@@ -251,3 +251,21 @@ class CustomRulesIntegrationTests(SafetyNetTestCase):
             "[block-parallel-curl]",
             cwd=str(self.tmpdir),
         )
+
+    def test_attached_option_value_not_false_positive(self) -> None:
+        """Attached option values like -C/path don't trigger unrelated short opts."""
+        self._write_config(
+            {
+                "version": 1,
+                "rules": [
+                    {
+                        "name": "block-p-flag",
+                        "command": "git",
+                        "block_args": ["-p"],
+                        "reason": "No -p allowed.",
+                    }
+                ],
+            }
+        )
+        # -C/path/to/project contains 'p' in the path, but should NOT match -p
+        self._assert_allowed("git -C/path/to/project status", cwd=str(self.tmpdir))

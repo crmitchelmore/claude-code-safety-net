@@ -3,6 +3,7 @@
 import posixpath
 
 from .config import CustomRule
+from .shell import _short_opts
 
 
 def _normalize_command(token: str) -> str:
@@ -15,10 +16,11 @@ def _extract_subcommand(tokens: list[str]) -> str | None:
 
     This is the subcommand for commands like git, docker, npm.
 
-    We use a conservative approach: we do NOT assume short options consume
-    the next token, because we can't know without command-specific knowledge.
-    This may cause false positives (option values treated as subcommands) but
-    avoids false negatives (missing real subcommands), which is the safer error.
+    Limitation: We do NOT assume short options consume the next token, because
+    we can't know without command-specific knowledge. For commands like
+    `git -C /path push`, this returns `/path` (the option value) instead of
+    `push` (the real subcommand), causing false negatives for subcommand-based
+    rules. This is a known trade-off to avoid command-specific parsing.
     """
     i = 1
     while i < len(tokens):
@@ -72,6 +74,9 @@ def check_custom_rules(
     # Build a set of all tokens for fast lookup
     token_set = set(tokens)
 
+    # Extract expanded short options (e.g., -Ap -> {'A', 'p'})
+    short_opts = _short_opts(tokens)
+
     for rule in rules:
         # Check command match (case-sensitive per spec)
         if rule.command != command:
@@ -84,7 +89,17 @@ def check_custom_rules(
 
         # Check if any blocked arg is present
         for blocked_arg in rule.block_args:
+            # Exact match
             if blocked_arg in token_set:
+                return f"[{rule.name}] {rule.reason}"
+
+            # Short option expansion: -A matches -Ap, -Au, etc.
+            if (
+                len(blocked_arg) == 2
+                and blocked_arg[0] == "-"
+                and blocked_arg[1] != "-"
+                and blocked_arg[1] in short_opts
+            ):
                 return f"[{rule.name}] {rule.reason}"
 
     return None

@@ -297,8 +297,8 @@ class TestCustomRuleMatching(unittest.TestCase):
             result = check_custom_rules(["git", "add", arg], rules)
             self.assertIsNotNone(result, f"Expected {arg} to trigger block")
 
-    def test_combined_short_options_not_expanded(self) -> None:
-        """Combined short options like -Ap are NOT expanded."""
+    def test_combined_short_options_expanded(self) -> None:
+        """Combined short options like -Ap ARE expanded to match -A."""
         rules = [
             CustomRule(
                 name="test",
@@ -308,8 +308,53 @@ class TestCustomRuleMatching(unittest.TestCase):
                 reason="test",
             )
         ]
-        # -Ap is NOT the same as -A
+        # -Ap contains -A, so it should be blocked
         result = check_custom_rules(["git", "add", "-Ap"], rules)
+        self.assertEqual(result, "[test] test")
+
+    def test_combined_short_options_case_sensitive(self) -> None:
+        """Short option expansion is case-sensitive."""
+        rules = [
+            CustomRule(
+                name="test",
+                command="git",
+                subcommand="add",
+                block_args=["-A"],
+                reason="test",
+            )
+        ]
+        # -ap does NOT contain -A (lowercase a != uppercase A)
+        result = check_custom_rules(["git", "add", "-ap"], rules)
+        self.assertIsNone(result)
+
+    def test_combined_short_options_multiple_flags(self) -> None:
+        """Multiple bundled flags are all expanded."""
+        rules = [
+            CustomRule(
+                name="test",
+                command="git",
+                subcommand="add",
+                block_args=["-u"],
+                reason="test",
+            )
+        ]
+        # -Aup contains -u
+        result = check_custom_rules(["git", "add", "-Aup"], rules)
+        self.assertEqual(result, "[test] test")
+
+    def test_long_options_not_expanded(self) -> None:
+        """Long options are NOT expanded (exact match only)."""
+        rules = [
+            CustomRule(
+                name="test",
+                command="git",
+                subcommand="add",
+                block_args=["--all"],
+                reason="test",
+            )
+        ]
+        # --all-files is not --all
+        result = check_custom_rules(["git", "add", "--all-files"], rules)
         self.assertIsNone(result)
 
     def test_subcommand_after_double_dash(self) -> None:
