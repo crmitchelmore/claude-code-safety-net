@@ -29,6 +29,14 @@ class Config:
     rules: list[CustomRule] = field(default_factory=list)
 
 
+@dataclass
+class ValidationResult:
+    """Result of config file validation."""
+
+    errors: list[str]
+    rule_names: list[str]  # Empty if errors exist
+
+
 # Validation patterns from spec
 _NAME_PATTERN = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]{0,63}$")
 _COMMAND_PATTERN = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]*$")
@@ -229,36 +237,32 @@ def load_config(cwd: str | None = None) -> Config | None:
     return merged
 
 
-def validate_config_file(path: str) -> list[str]:
-    """Validate a config file and return list of error messages.
-
-    Returns empty list if valid.
-    """
-    errors: list[str] = []
+def validate_config_file(path: str) -> ValidationResult:
+    """Validate a config file and return result with errors and rule names."""
     config_path = Path(path).expanduser()
 
     if not config_path.exists():
-        return [f"file not found: {path}"]
+        return ValidationResult(errors=[f"file not found: {path}"], rule_names=[])
 
     try:
         content = config_path.read_text(encoding="utf-8")
     except OSError as e:
-        return [f"cannot read file: {e}"]
+        return ValidationResult(errors=[f"cannot read file: {e}"], rule_names=[])
 
     if not content.strip():
-        return ["config file is empty"]
+        return ValidationResult(errors=["config file is empty"], rule_names=[])
 
     try:
         data = json.loads(content)
     except json.JSONDecodeError as e:
-        return [f"invalid JSON: {e}"]
+        return ValidationResult(errors=[f"invalid JSON: {e}"], rule_names=[])
 
     if not isinstance(data, dict):
-        return ["config must be a JSON object"]
+        return ValidationResult(errors=["config must be a JSON object"], rule_names=[])
 
     try:
-        _validate_config(data)
+        config = _validate_config(data)
+        rule_names = [rule.name for rule in config.rules]
+        return ValidationResult(errors=[], rule_names=rule_names)
     except ConfigError as e:
-        errors.append(str(e))
-
-    return errors
+        return ValidationResult(errors=[str(e)], rule_names=[])

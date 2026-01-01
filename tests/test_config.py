@@ -673,23 +673,23 @@ class TestConfigScopeMerging(TempDirTestCase):
 class TestValidateConfigFile(TempDirTestCase):
     """Tests for validate_config_file function."""
 
-    def test_valid_file_returns_empty_list(self) -> None:
-        """Valid config file returns empty error list."""
+    def test_valid_file_returns_empty_errors(self) -> None:
         path = self.tmpdir / "config.json"
         path.write_text(json.dumps({"version": 1}), encoding="utf-8")
-        errors = validate_config_file(str(path))
-        self.assertEqual(errors, [])
+        result = validate_config_file(str(path))
+        self.assertEqual(result.errors, [])
+        self.assertEqual(result.rule_names, [])
 
     def test_nonexistent_file_returns_error(self) -> None:
         """Non-existent file returns error."""
-        errors = validate_config_file("/nonexistent/config.json")
-        self.assertEqual(len(errors), 1)
-        self.assertIn("file not found", errors[0])
+        result = validate_config_file("/nonexistent/config.json")
+        self.assertEqual(len(result.errors), 1)
+        self.assertIn("file not found", result.errors[0])
 
     def test_invalid_file_returns_errors(self) -> None:
         """Invalid config returns error messages."""
         path = self.tmpdir / "config.json"
         path.write_text(json.dumps({"version": 2}), encoding="utf-8")
-        errors = validate_config_file(str(path))
-        self.assertEqual(len(errors), 1)
-        self.assertIn("unsupported version", errors[0])
+        result = validate_config_file(str(path))
+        self.assertEqual(len(result.errors), 1)
+        self.assertIn("unsupported version", result.errors[0])
