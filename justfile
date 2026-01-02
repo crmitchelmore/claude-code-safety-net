@@ -16,6 +16,10 @@ check:
 
 # Bump version and generate changelog
 bump:
-    uv run cz bump
+    @test "$(git branch --show-current)" = "main" || (echo "Error: Must be on main branch to release" && exit 1)
+    uv run cz bump --no-verify
+    uv sync
+    git add uv.lock
+    git commit --amend --no-edit --no-verify
     git push -u origin HEAD --follow-tags
     gh release create $(git describe --tags --abbrev=0) --notes "$(uv run cz changelog $(git describe --tags --abbrev=0) --dry-run)"
