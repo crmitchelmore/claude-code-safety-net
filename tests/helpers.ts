@@ -36,7 +36,7 @@ export function assertBlocked(
 	const options = getOptionsFromEnv(cwd);
 	const result = analyzeCommand(command, options);
 	expect(result).not.toBeNull();
-	expect(result).toContain(reasonContains);
+	expect(result?.reason).toContain(reasonContains);
 }
 
 export function assertAllowed(command: string, cwd?: string): void {
@@ -51,7 +51,7 @@ export function runGuard(
 	config?: Config,
 ): string | null {
 	const options = getOptionsFromEnv(cwd, config);
-	return analyzeCommand(command, options);
+	return analyzeCommand(command, options)?.reason ?? null;
 }
 
 export function withEnv<T>(env: Record<string, string>, fn: () => T): T {

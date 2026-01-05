@@ -12,7 +12,7 @@ function writeConfig(dir: string, data: object): void {
 
 function runGuard(command: string, cwd?: string): string | null {
 	const config = loadConfig(cwd);
-	return analyzeCommand(command, { cwd, config });
+	return analyzeCommand(command, { cwd, config })?.reason ?? null;
 }
 
 function assertBlocked(
