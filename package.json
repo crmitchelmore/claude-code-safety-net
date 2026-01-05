@@ -12,7 +12,7 @@
 		"dist"
 	],
 	"scripts": {
-		"build": "bun build src/index.ts --outdir dist --target node && bun run build:types",
+		"build": "bun build src/index.ts src/bin/cc-safety-net.ts --outdir dist --target node && bun run build:types",
 		"build:types": "tsc --emitDeclarationOnly --declaration --noEmit false",
 		"clean": "rm -rf dist",
 		"check": "bun run lint && bun run typecheck && bun run knip && bun run sg:scan && AGENT=1 bun test",
@@ -45,8 +45,8 @@
 		"shell-quote": "^1.8.3"
 	},
 	"trustedDependencies": [
-    "@ast-grep/cli"
-  ],
+		"@ast-grep/cli"
+	],
 	"engines": {
 		"node": ">=18"
 	},
