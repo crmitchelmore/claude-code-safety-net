@@ -20,10 +20,11 @@ export interface LoadConfigOptions {
 }
 
 export function loadConfig(cwd?: string, options?: LoadConfigOptions): Config {
+	const safeCwd = typeof cwd === "string" ? cwd : process.cwd();
 	const userConfigDir =
 		options?.userConfigDir ?? join(homedir(), ".cc-safety-net");
 	const userConfigPath = join(userConfigDir, "config.json");
-	const projectConfigPath = join(cwd ?? process.cwd(), ".safety-net.json");
+	const projectConfigPath = join(safeCwd, ".safety-net.json");
 
 	const userConfig = loadSingleConfig(userConfigPath);
 	const projectConfig = loadSingleConfig(projectConfigPath);
@@ -93,6 +94,7 @@ function mergeConfigs(
 	};
 }
 
+/** @internal Exported for testing */
 export function validateConfig(config: unknown): ValidationResult {
 	const errors: string[] = [];
 	const ruleNames = new Set<string>();
