@@ -1,5 +1,6 @@
 import type { Plugin } from "@opencode-ai/plugin";
 import { analyzeCommand, loadConfig } from "./core/analyze.ts";
+
 // import type { AnalyzeOptions, Config, CustomRule } from "./types.ts";
 
 // export { analyzeCommand, loadConfig };
@@ -7,8 +8,18 @@ import { analyzeCommand, loadConfig } from "./core/analyze.ts";
 
 // export { validateConfig, validateConfigFile } from "./core/config.ts";
 
+function envTruthy(name: string): boolean {
+	const value = process.env[name];
+	return value === "1" || value?.toLowerCase() === "true";
+}
+
 export const SafetyNetPlugin: Plugin = async ({ directory }) => {
-	const config = loadConfig();
+	const config = loadConfig(directory);
+	const strict = envTruthy("SAFETY_NET_STRICT");
+	const paranoidAll = envTruthy("SAFETY_NET_PARANOID");
+	const paranoidRm = paranoidAll || envTruthy("SAFETY_NET_PARANOID_RM");
+	const paranoidInterpreters =
+		paranoidAll || envTruthy("SAFETY_NET_PARANOID_INTERPRETERS");
 
 	return {
 		"tool.execute.before": async (input, output) => {
@@ -17,6 +28,9 @@ export const SafetyNetPlugin: Plugin = async ({ directory }) => {
 				const result = analyzeCommand(command, {
 					cwd: directory,
 					config,
+					strict,
+					paranoidRm,
+					paranoidInterpreters,
 				});
 				if (result) {
 					let message = `BLOCKED by Safety Net\n\nReason: ${result.reason}`;
