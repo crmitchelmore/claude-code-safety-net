@@ -30,4 +30,14 @@ just check
 
 <!-- Link related issues. Use "Closes #123" to auto-close on merge. -->
 
+### PR Checklist
+
+- [ ] Code follows project conventions (type hints, naming, etc.)
+- [ ] `bun run check` passes (lint, types, dead code, rules, tests)
+- [ ] Tests added for new rules (minimum 90% coverage required)
+- [ ] Tested locally with Claude Code, Opencode
+- [ ] Updated documentation if needed (README, AGENTS.md)
+- [ ] No version changes in `package.json`
+
+
 <!-- Closes # -->

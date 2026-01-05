@@ -1,0 +1,130 @@
+/**
+ * Shared types for the safety-net plugin.
+ */
+
+/** Custom rule definition from .safety-net.json */
+export interface CustomRule {
+	/** Unique identifier for the rule */
+	name: string;
+	/** Base command to match (e.g., "git", "npm") */
+	command: string;
+	/** Optional subcommand to match (e.g., "add", "install") */
+	subcommand?: string;
+	/** Arguments that trigger the block */
+	block_args: string[];
+	/** Message shown when blocked */
+	reason: string;
+}
+
+/** Configuration loaded from .safety-net.json */
+export interface Config {
+	/** Schema version (must be 1) */
+	version: number;
+	/** Custom blocking rules */
+	rules: CustomRule[];
+}
+
+/** Result of config validation */
+export interface ValidationResult {
+	/** List of validation error messages */
+	errors: string[];
+	/** Set of rule names found (for duplicate detection) */
+	ruleNames: Set<string>;
+}
+
+/** Claude Code hook input format */
+export interface HookInput {
+	hook_event_name: string;
+	tool_name: string;
+	tool_input: {
+		command: string;
+		timeout?: number;
+		workdir?: string;
+		description?: string;
+	};
+	session_id?: string;
+}
+
+/** Claude Code hook output format */
+export interface HookOutput {
+	hookSpecificOutput: {
+		hookEventName: string;
+		permissionDecision: "allow" | "deny";
+		permissionDecisionReason?: string;
+	};
+}
+
+/** Options for command analysis */
+export interface AnalyzeOptions {
+	/** Current working directory */
+	cwd?: string;
+	/** Effective cwd after cd commands (null = unknown, undefined = use cwd) */
+	effectiveCwd?: string | null;
+	/** Loaded configuration */
+	config?: Config;
+	/** Fail-closed on unparseable commands */
+	strict?: boolean;
+	/** Block non-temp rm -rf even within cwd */
+	paranoidRm?: boolean;
+	/** Block interpreter one-liners */
+	paranoidInterpreters?: boolean;
+	/** Allow $TMPDIR paths (false when TMPDIR is overridden to non-temp) */
+	allowTmpdirVar?: boolean;
+}
+
+/** Audit log entry */
+export interface AuditLogEntry {
+	ts: string;
+	command: string;
+	segment: string;
+	reason: string;
+	cwd?: string | null;
+}
+
+/** Constants */
+export const MAX_RECURSION_DEPTH = 5;
+export const MAX_STRIP_ITERATIONS = 20;
+
+export const NAME_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
+export const COMMAND_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
+export const MAX_REASON_LENGTH = 256;
+
+/** Shell operators that split commands */
+export const SHELL_OPERATORS = new Set(["&&", "||", "|&", "|", "&", ";", "\n"]);
+
+/** Shell wrappers that need recursive analysis */
+export const SHELL_WRAPPERS = new Set([
+	"bash",
+	"sh",
+	"zsh",
+	"ksh",
+	"dash",
+	"fish",
+	"csh",
+	"tcsh",
+]);
+
+/** Interpreters that can execute code */
+export const INTERPRETERS = new Set([
+	"python",
+	"python3",
+	"python2",
+	"node",
+	"ruby",
+	"perl",
+]);
+
+/** Dangerous commands to detect in interpreter code */
+export const DANGEROUS_PATTERNS = [
+	/\brm\s+.*-[rR].*-f\b/,
+	/\brm\s+.*-f.*-[rR]\b/,
+	/\brm\s+-rf\b/,
+	/\brm\s+-fr\b/,
+	/\bgit\s+reset\s+--hard\b/,
+	/\bgit\s+checkout\s+--\b/,
+	/\bgit\s+clean\s+-f\b/,
+	/\bfind\b.*\s-delete\b/,
+];
+
+export const PARANOID_INTERPRETERS_SUFFIX =
+	"\n\n(Paranoid mode: interpreter one-liners are blocked.)";

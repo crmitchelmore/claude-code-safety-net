@@ -1,0 +1,14 @@
+id: no-dynamic-import
+snapshots:
+  await import('bar'):
+    labels:
+    - source: await import('bar')
+      style: primary
+      start: 0
+      end: 19
+  const foo = await import('bar'):
+    labels:
+    - source: await import('bar')
+      style: primary
+      start: 12
+      end: 31

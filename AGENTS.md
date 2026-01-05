@@ -1,81 +1,67 @@
 # Agent Guidelines
 
-A Claude Code plugin that blocks destructive git and filesystem commands before execution. Works as a PreToolUse hook intercepting Bash commands.
+A Claude Code / OpenCode plugin that blocks destructive git and filesystem commands before execution. Works as a PreToolUse hook intercepting Bash commands.
 
 ## Commands
 
 | Task | Command |
 |------|---------|
-| Setup | `just setup` |
-| All checks | `just check` |
-| Lint | `uv run ruff check` |
-| Lint + fix | `uv run ruff check --fix` |
-| Format | `uv run ruff format` |
-| Type check | `uv run mypy .` |
-| Test all | `uv run pytest` |
-| Single test | `uv run pytest tests/test_file.py::TestClass::test_name -v` |
-| Pattern match | `uv run pytest -k "pattern" -v` |
-| Dead code | `uv run vulture` |
+| Install | `bun install` |
+| Build | `bun run build` |
+| All checks | `bun run check` |
+| Lint | `bun run lint` |
+| Type check | `bun run typecheck` |
+| Test all | `AGENT=1 bun test` |
+| Single test | `bun test tests/rules-git.test.ts` |
+| Pattern match | `bun test --test-name-pattern "pattern"` |
+| Dead code | `bun run knip` |
+| AST rules | `bun run sg:scan` |
 
-**`just check`** runs: ruff check --fix → mypy → vulture → pytest (with coverage)
+**`bun run check`** runs: biome check → typecheck → knip → ast-grep scan → bun test
 
 ## Pre-commit Hooks
 
-Runs on commit (in order): ruff format → ruff check --fix → mypy → vulture
+Runs on commit (in order): knip → lint-staged (biome check --write)
 
-## Code Style (Python 3.10+)
+## Code Style (TypeScript)
 
 ### Formatting
-- Line length: 88 chars, indent: 4 spaces, formatter: Ruff
-- Ruff lint rules: E (pycodestyle), F (pyflakes), I (isort), B (bugbear), UP (pyupgrade)
+- Formatter: Biome
+- Line length: configured in `biome.json`
+- Use tabs for indentation (Biome default)
 
 ### Type Hints
-- **Required** on all functions (`disallow_untyped_defs = true`)
-- Exception: test files allow untyped defs
-- Use `X | None` not `Optional[X]`, use `list[str]` not `List[str]`
-- Use keyword-only args with `*` for clarity
+- **Required** on all functions
+- Use `| null` or `| undefined` appropriately
+- Use lowercase primitive types (`string`, `number`, `boolean`)
+- Use `readonly` arrays where mutation isn't needed
 
-```python
-# Good
-def analyze(command: str, *, strict: bool = False) -> str | None: ...
-def _analyze_rm(tokens: list[str], *, cwd: str | None, strict: bool) -> str | None: ...
+```typescript
+// Good
+function analyze(command: string, options?: { strict?: boolean }): string | null { ... }
+function analyzeRm(tokens: readonly string[], cwd: string | null): string | null { ... }
 
-# Bad
-def analyze(command, strict=False): ...  # Missing hints
-def analyze(command: str) -> Optional[str]: ...  # Old syntax
+// Bad
+function analyze(command, strict) { ... }  // Missing types
 ```
 
 ### Imports
-- Order: stdlib → third-party → local (sorted by ruff)
+- Order: handled by Biome (sorted automatically)
 - Use relative imports within same package
+- Prefer named exports over default exports
 
-```python
-import json
-import sys
-from os import getenv
-from pathlib import Path
-
-from .rules_git import _analyze_git
-from .shell import _shlex_split
+```typescript
+import { parse } from "shell-quote"
+import type { Config, HookInput } from "../types"
+import { analyzeGit } from "./rules-git"
+import { splitShellCommands } from "./shell"
 ```
 
 ### Naming
-- Functions/variables: `snake_case`
-- Classes: `PascalCase`
-- Constants: `UPPER_SNAKE_CASE` (reason strings: `_REASON_*`)
-- Private/internal: `_leading_underscore`
-- Prefer `Path` objects over string paths
-
-### Docstrings
-- Module-level: Required (first line of every `.py` file)
-- Function-level: Required for non-trivial logic
-
-```python
-"""Git command analysis rules for the safety net."""
-
-def _analyze_git(tokens: list[str]) -> str | None:
-    """Analyze git command tokens and return block reason if dangerous."""
-```
+- Functions/variables: `camelCase`
+- Types/interfaces: `PascalCase`
+- Constants: `UPPER_SNAKE_CASE` (reason strings: `REASON_*`)
+- Private/internal: `_leadingUnderscore` (for module-private functions)
 
 ### Error Handling
 - Print errors to stderr
@@ -85,62 +71,61 @@ def _analyze_git(tokens: list[str]) -> str | None:
 ## Architecture
 
 ```
-scripts/safety_net.py           # Entry point (calls hook.main())
-  └── safety_net_impl/hook.py   # Main hook logic
-        ├── main()              # JSON I/O, entry point
-        ├── _analyze_command()  # Splits on shell operators, passes config
-        ├── _analyze_segment()  # Tokenizes, strips wrappers, dispatches, applies custom rules
-        ├── config.py           # Config loading (.safety-net.json)
-        ├── rules_custom.py     # Custom rule evaluation
-        ├── rules_git.py        # Git subcommand analysis
-        ├── rules_rm.py         # rm command analysis
-        └── shell.py            # Shell parsing utilities
+src/
+├── index.ts                   # OpenCode plugin export (main entry)
+├── types.ts                   # Shared types and constants
+├── bin/
+│   └── cc-safety-net.ts       # Claude Code CLI wrapper
+└── core/
+    ├── analyze.ts             # Main analysis logic
+    ├── config.ts              # Config loading (.safety-net.json)
+    ├── shell.ts               # Shell parsing (uses shell-quote)
+    ├── rules-git.ts           # Git subcommand analysis
+    ├── rules-rm.ts            # rm command analysis
+    └── rules-custom.ts        # Custom rule evaluation
 ```
 
 | Module | Purpose |
 |--------|---------|
-| `hook.py` | Main entry, JSON I/O, command analysis orchestration |
-| `config.py` | Config loading (`.safety-net.json`), Config dataclass |
-| `rules_custom.py` | Custom rule evaluation (`_check_custom_rules`) |
-| `rules_git.py` | Git rules (checkout, restore, reset, clean, push, branch, stash) |
-| `rules_rm.py` | rm analysis (cwd-relative, temp paths, root/home detection) |
-| `shell.py` | Shell parsing (`_split_shell_commands`, `_shlex_split`, `_strip_wrappers`) |
+| `index.ts` | OpenCode plugin export |
+| `bin/cc-safety-net.ts` | Claude Code CLI wrapper, JSON I/O |
+| `analyze.ts` | Main entry, command analysis orchestration |
+| `config.ts` | Config loading (`.safety-net.json`), Config type |
+| `rules-custom.ts` | Custom rule evaluation (`checkCustomRules`) |
+| `rules-git.ts` | Git rules (checkout, restore, reset, clean, push, branch, stash) |
+| `rules-rm.ts` | rm analysis (cwd-relative, temp paths, root/home detection) |
+| `shell.ts` | Shell parsing (`splitShellCommands`, `shlexSplit`, `stripWrappers`) |
 
 ## Testing
 
-Inherit from `SafetyNetTestCase` for hook tests:
+Use Bun's built-in test runner with test helpers:
 
-```python
-from tests import TempDirTestCase
-from tests.safety_net_test_base import SafetyNetTestCase
+```typescript
+import { describe, test } from "bun:test"
+import { assertBlocked, assertAllowed } from "./helpers"
 
-class TestMyRules(SafetyNetTestCase):
-    def test_dangerous_blocked(self) -> None:
-        self._assert_blocked("git reset --hard", "git reset --hard")
+describe("git rules", () => {
+  test("git reset --hard blocked", () => {
+    assertBlocked("git reset --hard", "git reset --hard")
+  })
 
-    def test_safe_allowed(self) -> None:
-        self._assert_allowed("git status")
+  test("git status allowed", () => {
+    assertAllowed("git status")
+  })
 
-    def test_with_cwd(self) -> None:
-        self._assert_blocked("rm -rf /", "rm -rf", cwd="/home/user")
+  test("with cwd", () => {
+    assertBlocked("rm -rf /", "rm -rf", "/home/user")
+  })
+})
 ```
 
 ### Test Helpers
-| Method | Purpose |
-|--------|---------|
-| `_run_guard(command, cwd=None)` | Run guard, return parsed JSON or None |
-| `_assert_blocked(command, reason_contains, cwd=None)` | Verify command is blocked |
-| `_assert_allowed(command, cwd=None)` | Verify command passes through |
-
-### Filesystem Tests
-Use `TempDirTestCase` for tests needing a temp directory:
-
-```python
-class TestFilesystem(TempDirTestCase):
-    def test_something(self) -> None:
-        (self.tmpdir / "file.txt").write_text("content")
-        # self.tmpdir is a Path object, auto-cleaned after test
-```
+| Function | Purpose |
+|----------|---------|
+| `assertBlocked(command, reasonContains, cwd?)` | Verify command is blocked |
+| `assertAllowed(command, cwd?)` | Verify command passes through |
+| `withTempDir(fn)` | Run test with temporary directory |
+| `withConfig(config, fn)` | Run test with custom config |
 
 ## Environment Variables
 
@@ -162,21 +147,21 @@ class TestFilesystem(TempDirTestCase):
 ## Adding New Rules
 
 ### Git Rule
-1. Add reason constant in `rules_git.py`: `_REASON_* = "..."`
-2. Add detection logic in `_analyze_git()`
-3. Add tests in `tests/test_safety_net_git.py`
-4. Run `just check`
+1. Add reason constant in `rules-git.ts`: `const REASON_* = "..."`
+2. Add detection logic in `analyzeGit()`
+3. Add tests in `tests/rules-git.test.ts`
+4. Run `bun run check`
 
 ### rm Rule
-1. Add logic in `rules_rm.py`
-2. Add tests in `tests/test_safety_net_rm.py`
-3. Run `just check`
+1. Add logic in `rules-rm.ts`
+2. Add tests in `tests/rules-rm.test.ts`
+3. Run `bun run check`
 
 ### Other Command Rules
-1. Add reason constant in `hook.py`: `_REASON_* = "..."`
-2. Add detection in `_analyze_segment()` 
+1. Add reason constant in `analyze.ts`: `const REASON_* = "..."`
+2. Add detection in `analyzeSegment()` 
 3. Add tests in appropriate test file
-4. Run `just check`
+4. Run `bun run check`
 
 ## Edge Cases to Test
 
@@ -202,3 +187,30 @@ Blocked commands produce JSON:
 ```
 
 Allowed commands produce no output (exit 0 silently).
+
+## Bun Guidelines
+
+Default to using Bun instead of Node.js.
+
+- Use `bun <file>` instead of `node <file>` or `ts-node <file>`
+- Use `bun test` instead of `jest` or `vitest`
+- Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`
+- Use `bun install` instead of `npm install` or `yarn install` or `pnpm install`
+- Use `bun run <script>` instead of `npm run <script>` or `yarn run <script>` or `pnpm run <script>`
+- Use `bunx <package> <command>` instead of `npx <package> <command>`
+- Bun automatically loads .env, so don't use dotenv.
+
+## APIs
+
+- `Bun.serve()` supports WebSockets, HTTPS, and routes. Don't use `express`.
+- `bun:sqlite` for SQLite. Don't use `better-sqlite3`.
+- `Bun.redis` for Redis. Don't use `ioredis`.
+- `Bun.sql` for Postgres. Don't use `pg` or `postgres.js`.
+- `WebSocket` is built-in. Don't use `ws`.
+- Bun.$`ls` instead of execa.
+
+## Testing
+
+Use `AGENT=1 bun test` to run tests.
+
+For more information, read the Bun API docs in `node_modules/bun-types/docs/**.mdx`.

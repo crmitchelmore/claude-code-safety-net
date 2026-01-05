@@ -1,0 +1,412 @@
+import { type ParseEntry, parse } from "shell-quote";
+import { MAX_STRIP_ITERATIONS, SHELL_OPERATORS } from "../types.ts";
+
+// Proxy that preserves variable references as $VAR strings instead of expanding them
+const ENV_PROXY = new Proxy(
+	{},
+	{
+		get: (_, name) => `$${String(name)}`,
+	},
+);
+
+export function splitShellCommands(command: string): string[][] {
+	if (hasUnclosedQuotes(command)) {
+		return [[command]];
+	}
+	const normalizedCommand = command.replace(/\n/g, " ; ");
+	const tokens = parse(normalizedCommand, ENV_PROXY);
+	const segments: string[][] = [];
+	let current: string[] = [];
+	let i = 0;
+
+	while (i < tokens.length) {
+		const token = tokens[i];
+		if (token === undefined) {
+			i++;
+			continue;
+		}
+
+		if (isOperator(token)) {
+			if (current.length > 0) {
+				segments.push(current);
+				current = [];
+			}
+			i++;
+		} else if (typeof token === "string") {
+			const nextToken = tokens[i + 1];
+			if (token === "$" && nextToken && isParenOpen(nextToken)) {
+				if (current.length > 0) {
+					segments.push(current);
+					current = [];
+				}
+				const { innerSegments, endIndex } = extractCommandSubstitution(
+					tokens,
+					i + 2,
+				);
+				for (const seg of innerSegments) {
+					segments.push(seg);
+				}
+				i = endIndex + 1;
+			} else {
+				const backtickSegments = extractBacktickSubstitutions(token);
+				if (backtickSegments.length > 0) {
+					for (const seg of backtickSegments) {
+						segments.push(seg);
+					}
+				}
+				current.push(token);
+				i++;
+			}
+		} else {
+			i++;
+		}
+	}
+
+	if (current.length > 0) {
+		segments.push(current);
+	}
+
+	return segments;
+}
+
+function extractBacktickSubstitutions(token: string): string[][] {
+	const segments: string[][] = [];
+	let i = 0;
+
+	while (i < token.length) {
+		const backtickStart = token.indexOf("`", i);
+		if (backtickStart === -1) break;
+
+		const backtickEnd = token.indexOf("`", backtickStart + 1);
+		if (backtickEnd === -1) break;
+
+		const innerCommand = token.slice(backtickStart + 1, backtickEnd);
+		if (innerCommand.trim()) {
+			const innerSegments = splitShellCommands(innerCommand);
+			for (const seg of innerSegments) {
+				segments.push(seg);
+			}
+		}
+		i = backtickEnd + 1;
+	}
+
+	return segments;
+}
+
+function isParenOpen(token: ParseEntry | undefined): boolean {
+	return (
+		typeof token === "object" &&
+		token !== null &&
+		"op" in token &&
+		token.op === "("
+	);
+}
+
+function isParenClose(token: ParseEntry | undefined): boolean {
+	return (
+		typeof token === "object" &&
+		token !== null &&
+		"op" in token &&
+		token.op === ")"
+	);
+}
+
+function extractCommandSubstitution(
+	tokens: ParseEntry[],
+	startIndex: number,
+): { innerSegments: string[][]; endIndex: number } {
+	const innerSegments: string[][] = [];
+	let currentSegment: string[] = [];
+	let depth = 1;
+	let i = startIndex;
+
+	while (i < tokens.length && depth > 0) {
+		const token = tokens[i];
+
+		if (isParenOpen(token)) {
+			depth++;
+		} else if (isParenClose(token)) {
+			depth--;
+			if (depth === 0) break;
+		} else if (depth === 1 && token && isOperator(token)) {
+			if (currentSegment.length > 0) {
+				innerSegments.push(currentSegment);
+				currentSegment = [];
+			}
+		} else if (typeof token === "string") {
+			currentSegment.push(token);
+		}
+		i++;
+	}
+
+	if (currentSegment.length > 0) {
+		innerSegments.push(currentSegment);
+	}
+
+	return { innerSegments, endIndex: i };
+}
+
+function hasUnclosedQuotes(command: string): boolean {
+	let inSingle = false;
+	let inDouble = false;
+	let escaped = false;
+
+	for (const char of command) {
+		if (escaped) {
+			escaped = false;
+			continue;
+		}
+		if (char === "\\") {
+			escaped = true;
+			continue;
+		}
+		if (char === "'" && !inDouble) {
+			inSingle = !inSingle;
+		} else if (char === '"' && !inSingle) {
+			inDouble = !inDouble;
+		}
+	}
+
+	return inSingle || inDouble;
+}
+
+export interface EnvStrippingResult {
+	tokens: string[];
+	envAssignments: Map<string, string>;
+}
+
+export function stripEnvAssignmentsWithInfo(
+	tokens: string[],
+): EnvStrippingResult {
+	const envAssignments = new Map<string, string>();
+	let i = 0;
+	while (i < tokens.length) {
+		const token = tokens[i];
+		if (token && /^[A-Za-z_][A-Za-z0-9_]*=/.test(token)) {
+			const eqIdx = token.indexOf("=");
+			const name = token.slice(0, eqIdx);
+			const value = token.slice(eqIdx + 1);
+			envAssignments.set(name, value);
+			i++;
+		} else {
+			break;
+		}
+	}
+	return { tokens: tokens.slice(i), envAssignments };
+}
+
+export interface WrapperStrippingResult {
+	tokens: string[];
+	envAssignments: Map<string, string>;
+}
+
+export function stripWrappers(tokens: string[]): string[] {
+	return stripWrappersWithInfo(tokens).tokens;
+}
+
+export function stripWrappersWithInfo(
+	tokens: string[],
+): WrapperStrippingResult {
+	let result = [...tokens];
+	const allEnvAssignments = new Map<string, string>();
+
+	for (let iteration = 0; iteration < MAX_STRIP_ITERATIONS; iteration++) {
+		const before = result.join(" ");
+
+		const { tokens: strippedTokens, envAssignments } =
+			stripEnvAssignmentsWithInfo(result);
+		for (const [k, v] of envAssignments) {
+			allEnvAssignments.set(k, v);
+		}
+		result = strippedTokens;
+		if (result.length === 0) break;
+
+		while (
+			result.length > 0 &&
+			result[0]?.includes("=") &&
+			!/^[A-Za-z_][A-Za-z0-9_]*=/.test(result[0] ?? "")
+		) {
+			result = result.slice(1);
+		}
+		if (result.length === 0) break;
+
+		const head = result[0]?.toLowerCase();
+
+		if (head === "sudo") {
+			result = stripSudo(result);
+		} else if (head === "env") {
+			const envResult = stripEnvWithInfo(result);
+			result = envResult.tokens;
+			for (const [k, v] of envResult.envAssignments) {
+				allEnvAssignments.set(k, v);
+			}
+		} else if (head === "command") {
+			result = stripCommand(result);
+		} else {
+			break;
+		}
+
+		if (result.join(" ") === before) break;
+	}
+
+	const { tokens: finalTokens, envAssignments: finalAssignments } =
+		stripEnvAssignmentsWithInfo(result);
+	for (const [k, v] of finalAssignments) {
+		allEnvAssignments.set(k, v);
+	}
+
+	return { tokens: finalTokens, envAssignments: allEnvAssignments };
+}
+
+function stripSudo(tokens: string[]): string[] {
+	let i = 1;
+	while (i < tokens.length) {
+		const token = tokens[i];
+		if (!token) break;
+
+		if (token === "--") {
+			return tokens.slice(i + 1);
+		}
+		if (token.startsWith("-")) {
+			if (
+				token === "-u" ||
+				token === "-g" ||
+				token === "-C" ||
+				token === "-D" ||
+				token === "-h" ||
+				token === "-p" ||
+				token === "-r" ||
+				token === "-t" ||
+				token === "-T" ||
+				token === "-U"
+			) {
+				i += 2;
+			} else {
+				i++;
+			}
+		} else {
+			break;
+		}
+	}
+	return tokens.slice(i);
+}
+
+interface EnvStripResult {
+	tokens: string[];
+	envAssignments: Map<string, string>;
+}
+
+function stripEnvWithInfo(tokens: string[]): EnvStripResult {
+	const envAssignments = new Map<string, string>();
+	let i = 1;
+	while (i < tokens.length) {
+		const token = tokens[i];
+		if (!token) break;
+
+		if (token === "--") {
+			return { tokens: tokens.slice(i + 1), envAssignments };
+		}
+		if (token === "-i" || token === "-0" || token === "--null") {
+			i++;
+		} else if (
+			token === "-u" ||
+			token === "--unset" ||
+			token === "-C" ||
+			token === "--chdir" ||
+			token === "-S" ||
+			token === "--split-string" ||
+			token === "-P"
+		) {
+			i += 2;
+		} else if (token.startsWith("-u=") || token.startsWith("--unset=")) {
+			i++;
+		} else if (token.startsWith("-C=") || token.startsWith("--chdir=")) {
+			i++;
+		} else if (token.startsWith("-P")) {
+			i++;
+		} else if (token.startsWith("-")) {
+			i++;
+		} else if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(token)) {
+			const eqIdx = token.indexOf("=");
+			const name = token.slice(0, eqIdx);
+			const value = token.slice(eqIdx + 1);
+			envAssignments.set(name, value);
+			i++;
+		} else {
+			break;
+		}
+	}
+	return { tokens: tokens.slice(i), envAssignments };
+}
+
+function stripCommand(tokens: string[]): string[] {
+	let i = 1;
+	while (i < tokens.length) {
+		const token = tokens[i];
+		if (!token) break;
+
+		if (token === "-p" || token === "-v" || token === "-V") {
+			i++;
+		} else if (
+			token.startsWith("-") &&
+			!token.startsWith("--") &&
+			token.length > 1
+		) {
+			const chars = token.slice(1);
+			if (/^[pvV]+$/.test(chars)) {
+				i++;
+			} else {
+				break;
+			}
+		} else if (token === "--") {
+			return tokens.slice(i + 1);
+		} else {
+			break;
+		}
+	}
+	return tokens.slice(i);
+}
+
+export function extractShortOpts(tokens: string[]): Set<string> {
+	const opts = new Set<string>();
+	let pastDoubleDash = false;
+
+	for (const token of tokens) {
+		if (token === "--") {
+			pastDoubleDash = true;
+			continue;
+		}
+		if (pastDoubleDash) continue;
+
+		if (token.startsWith("-") && !token.startsWith("--") && token.length > 1) {
+			for (let i = 1; i < token.length; i++) {
+				const char = token[i];
+				if (char && /[a-zA-Z]/.test(char)) {
+					opts.add(`-${char}`);
+				} else {
+					break;
+				}
+			}
+		}
+	}
+
+	return opts;
+}
+
+export function normalizeCommandToken(token: string): string {
+	const basename = token.includes("/")
+		? (token.split("/").pop() ?? token)
+		: token;
+	return basename.toLowerCase();
+}
+
+export function getBasename(token: string): string {
+	return token.includes("/") ? (token.split("/").pop() ?? token) : token;
+}
+
+function isOperator(token: ParseEntry): boolean {
+	if (typeof token === "object" && token !== null && "op" in token) {
+		return SHELL_OPERATORS.has(token.op as string);
+	}
+	return false;
+}

@@ -1,0 +1,7 @@
+id: no-dynamic-import
+valid:
+  - "import { foo } from 'bar'"
+  - "import * as foo from 'bar'"
+invalid:
+  - "await import('bar')"
+  - "const foo = await import('bar')"

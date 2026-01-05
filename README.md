@@ -260,7 +260,6 @@ If no config file is found in either location, only built-in rules apply.
 #### Known Limitations
 
 - **Short option expansion**: `-Cfoo` is treated as `-C -f -o -o`, not `-C foo`. Blocking `-f` may false-positive on attached option values.
-- **Subcommand detection**: Options that consume the next token (e.g., `git -C /path push`) may cause the option value to be detected as the subcommand, missing the real one.
 
 ### Examples
 

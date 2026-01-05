@@ -1,15 +1,15 @@
 {
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 --version >/dev/null 2>&1 && python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/safety_net.py\" || python \"${CLAUDE_PLUGIN_ROOT}/scripts/safety_net.py\""
-          }
-        ]
-      }
-    ]
-  }
+	"hooks": {
+		"PreToolUse": [
+			{
+				"matcher": "Bash",
+				"hooks": [
+					{
+						"type": "command",
+						"command": "bun run \"${CLAUDE_PLUGIN_ROOT}/src/bin/cc-safety-net.ts --claude-code\""
+					}
+				]
+			}
+		]
+	}
 }

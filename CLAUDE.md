@@ -4,38 +4,45 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A Claude Code plugin that blocks destructive git and filesystem commands before execution. It works as a PreToolUse hook that intercepts Bash commands and denies dangerous operations like `git reset --hard`, `rm -rf`, and `git checkout -- <files>`.
+A Claude Code and OpenCode plugin that blocks destructive git and filesystem commands before execution. It works as a PreToolUse hook that intercepts Bash commands and denies dangerous operations like `git reset --hard`, `rm -rf`, and `git checkout -- <files>`.
 
 ## Commands
 
-- **Setup**: `just setup` or `uv sync && uv run pre-commit install`
-- **All checks**: `just check` (runs ruff, mypy, vulture for dead code, pytest with coverage)
-- **Single test**: `uv run pytest tests/test_file.py::test_name -v`
-- **Lint**: `uv run ruff check` / **Format**: `uv run ruff format`
-- **Type check**: `uv run mypy .`
-- **Release**: `just bump` (bumps version, generates changelog, pushes tags, creates GitHub release)
-- **Verify config**: `uv run scripts/verify_config.py` (validates custom rule configs)
+- **Setup**: `bun install`
+- **All checks**: `bun run check` (runs lint, typecheck, knip, ast-grep scan, tests)
+- **Single test**: `bun test tests/file.test.ts`
+- **Lint**: `bun run lint` (uses Biome)
+- **Type check**: `bun run typecheck`
+- **Dead code**: `bun run knip`
+- **AST scan**: `bun run sg:scan`
+- **Build**: `bun run build`
 
 ## Architecture
 
 The hook receives JSON input on stdin containing `tool_name` and `tool_input`. For `Bash` tools, it analyzes the command and outputs JSON with `permissionDecision: "deny"` to block dangerous operations.
 
-**Entry point**: `scripts/safety_net.py` → delegates to `scripts/safety_net_impl/hook.py`
+**Entry points**:
+- `src/bin/cc-safety-net.ts` — Claude Code CLI (reads stdin JSON)
+- `src/index.ts` — OpenCode plugin export
 
 **Core analysis flow**:
-1. `hook.py:main()` parses JSON input, extracts command
-2. `_analyze_command()` splits command on shell operators (`;`, `&&`, `|`, etc.)
-3. `_analyze_segment()` tokenizes each segment, strips wrappers (sudo, env), identifies the command
-4. Dispatches to `rules_git.py:_analyze_git()` or `rules_rm.py:_analyze_rm()` based on command
-5. Checks custom rules via `rules_custom.py:check_custom_rules()` if configured
+1. `cc-safety-net.ts:main()` parses JSON input, extracts command
+2. `analyze.ts:analyzeCommand()` splits command on shell operators (`;`, `&&`, `|`, etc.)
+3. `analyzeSegment()` tokenizes each segment, strips wrappers (sudo, env), identifies the command
+4. Dispatches to `rules-git.ts:analyzeGit()` or `rules-rm.ts:analyzeRm()` based on command
+5. Checks custom rules via `rules-custom.ts:checkCustomRules()` if configured
 
-**Key modules**:
-- `shell.py`: Shell parsing (`_split_shell_commands`, `_shlex_split`, `_strip_wrappers`, `_short_opts`)
-- `rules_git.py`: Git subcommand analysis (checkout, restore, reset, clean, push, branch, stash)
-- `rules_rm.py`: rm analysis (allows rm -rf within cwd except when cwd is $HOME; temp paths always allowed; strict mode blocks non-temp)
-- `config.py`: Config loading, validation, merging (user `~/.cc-safety-net/config.json` + project `.safety-net.json`)
-- `rules_custom.py`: Custom rule matching (`check_custom_rules()`)
-- `tests/safety_net_test_base.py`: `SafetyNetTestCase` with `_run_guard()`, `_assert_blocked()`, `_assert_allowed()` helpers; `TempDirTestCase` for filesystem tests. 90% coverage enforced.
+**Key modules** (`src/core/`):
+- `shell.ts`: Shell parsing (`splitShellCommands`, `shlexSplit`, `stripWrappers`, `shortOpts`)
+- `rules-git.ts`: Git subcommand analysis (checkout, restore, reset, clean, push, branch, stash)
+- `rules-rm.ts`: rm analysis (allows rm -rf within cwd except when cwd is $HOME; temp paths always allowed; strict mode blocks non-temp)
+- `config.ts`: Config loading, validation, merging (user `~/.cc-safety-net/config.json` + project `.safety-net.json`)
+- `rules-custom.ts`: Custom rule matching (`checkCustomRules()`)
+- `audit.ts`: Audit logging for blocked commands
+- `verify-config.ts`: Config validator
+
+**Test utilities** (`tests/helpers.ts`):
+- `assertBlocked()`, `assertAllowed()` helpers for testing command analysis
 
 **Advanced detection**:
 - Recursively analyzes shell wrappers (`bash -c '...'`) up to 5 levels deep
@@ -45,12 +52,13 @@ The hook receives JSON input on stdin containing `tool_name` and `tool_input`. F
 - Redacts secrets (tokens, passwords, API keys) in block messages and audit logs
 - Audit logging: blocked commands logged to `~/.cc-safety-net/logs/<session_id>.jsonl`
 
-## Code Style (Python 3.10+)
+## Code Style (TypeScript)
 
-- All functions require type hints (`disallow_untyped_defs = true`)
-- Use `X | None` syntax (not `Optional[X]`)
-- Use `Path` not string paths where applicable
-- Ruff for formatting (88 char line length)
+- Use Bun instead of Node.js for running, testing, and building
+- Biome for linting and formatting
+- All functions require type annotations
+- Use `type | null` syntax (not `undefined` where possible)
+- Use kebab-case for file names (`rules-git.ts`, not `rulesGit.ts`)
 
 ## Environment Variables
 
@@ -65,4 +73,19 @@ Users can define additional blocking rules in two scopes (merged, project overri
 - **User scope**: `~/.cc-safety-net/config.json` (applies to all projects)
 - **Project scope**: `.safety-net.json` (in project root)
 
-Rules are additive only—cannot bypass built-in protections. Invalid config silently falls back to built-in rules only. Use `verify_config.py` to validate configs.
+Rules are additive only—cannot bypass built-in protections. Invalid config silently falls back to built-in rules only.
+
+## Testing
+
+Use `AGENT=1 bun test` to run tests.
+
+## Bun Best Practices
+
+- Use `bun <file>` instead of `node <file>` or `ts-node <file>`
+- Use `bun test` instead of `jest` or `vitest`
+- Use `bun build` instead of `webpack` or `esbuild`
+- Use `bun install` instead of `npm install`
+- Use `bun run <script>` instead of `npm run <script>`
+- Bun automatically loads .env, so don't use dotenv
+
+For more information, read the Bun API docs in `node_modules/bun-types/docs/**.mdx`.

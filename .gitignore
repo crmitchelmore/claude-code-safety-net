@@ -1,4 +1,5 @@
 # --- Project Specific ---
+.cursor/
 .claude/
 log*
 plan-*.md
@@ -9,6 +10,9 @@ plan-*.md
 __pycache__/
 *.py[cod]
 *$py.class
+
+# --- Node.js ---
+node_modules/
 
 # --- Tools & Linters ---
 .ruff_cache/
