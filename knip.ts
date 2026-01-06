@@ -1,7 +1,8 @@
 import type { KnipConfig } from "knip";
 
 const config: KnipConfig = {
-	project: ["src/**/*.ts!"],
+	entry: ["src/index.ts", "src/bin/cc-safety-net.ts", "scripts/**/*.ts"],
+	project: ["src/**/*.ts!", "scripts/**/*.ts!"],
 };
 
 export default config;
