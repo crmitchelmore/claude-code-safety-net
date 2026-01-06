@@ -24,7 +24,6 @@ A Claude Code plugin that acts as a safety net, catching destructive git and fil
   - [Config File Location](#config-file-location)
   - [Rule Schema](#rule-schema)
   - [Matching Behavior](#matching-behavior)
-    - [Known Limitations](#known-limitations)
   - [Examples](#examples)
   - [Error Handling](#error-handling)
 - [Advanced Features](#advanced-features)
