@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { analyzeCommand, loadConfig } from "../core/analyze.ts";
 import { redactSecrets, writeAuditLog } from "../core/audit.ts";
+import { envTruthy } from "../core/env.ts";
+import { formatBlockedMessage } from "../core/format.ts";
 import { verifyConfig } from "../core/verify-config.ts";
 import type { HookInput, HookOutput } from "../types.ts";
 
@@ -56,11 +58,6 @@ async function handleCliFlags(): Promise<boolean> {
 	console.error(`Unknown option: ${args[0]}`);
 	console.error("Run 'cc-safety-net --help' for usage.");
 	process.exit(1);
-}
-
-function envTruthy(name: string): boolean {
-	const value = process.env[name];
-	return value === "1" || value?.toLowerCase() === "true";
 }
 
 async function runClaudeCodeHook(): Promise<void> {
@@ -122,28 +119,12 @@ async function runClaudeCodeHook(): Promise<void> {
 }
 
 function outputDeny(reason: string, command?: string, segment?: string): void {
-	let message = `BLOCKED by Safety Net\n\nReason: ${reason}`;
-
-	if (command) {
-		const safeCommand = redactSecrets(command);
-		const excerpt =
-			safeCommand.length > 200
-				? `${safeCommand.slice(0, 200)}...`
-				: safeCommand;
-		message += `\n\nCommand: ${excerpt}`;
-	}
-
-	if (segment && segment !== command) {
-		const safeSegment = redactSecrets(segment);
-		const segmentExcerpt =
-			safeSegment.length > 200
-				? `${safeSegment.slice(0, 200)}...`
-				: safeSegment;
-		message += `\n\nSegment: ${segmentExcerpt}`;
-	}
-
-	message +=
-		"\n\nIf this operation is truly needed, ask the user for explicit permission and have them run the command manually.";
+	const message = formatBlockedMessage({
+		reason,
+		command,
+		segment,
+		redact: redactSecrets,
+	});
 
 	const output: HookOutput = {
 		hookSpecificOutput: {

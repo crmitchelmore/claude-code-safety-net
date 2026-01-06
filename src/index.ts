@@ -1,10 +1,7 @@
 import type { Plugin } from "@opencode-ai/plugin";
 import { analyzeCommand, loadConfig } from "./core/analyze.ts";
-
-function envTruthy(name: string): boolean {
-	const value = process.env[name];
-	return value === "1" || value?.toLowerCase() === "true";
-}
+import { envTruthy } from "./core/env.ts";
+import { formatBlockedMessage } from "./core/format.ts";
 
 export const SafetyNetPlugin: Plugin = async ({ directory }) => {
 	const config = loadConfig(directory);
@@ -26,22 +23,11 @@ export const SafetyNetPlugin: Plugin = async ({ directory }) => {
 					paranoidInterpreters,
 				});
 				if (result) {
-					let message = `BLOCKED by Safety Net\n\nReason: ${result.reason}`;
-
-					const excerpt =
-						command.length > 200 ? `${command.slice(0, 200)}...` : command;
-					message += `\n\nCommand: ${excerpt}`;
-
-					if (result.segment && result.segment !== command) {
-						const segmentExcerpt =
-							result.segment.length > 200
-								? `${result.segment.slice(0, 200)}...`
-								: result.segment;
-						message += `\n\nSegment: ${segmentExcerpt}`;
-					}
-
-					message +=
-						"\n\nIf this operation is truly needed, ask the user for explicit permission and have them run the command manually.";
+					const message = formatBlockedMessage({
+						reason: result.reason,
+						command,
+						segment: result.segment,
+					});
 
 					throw new Error(message);
 				}
