@@ -51,6 +51,15 @@ async function updatePackageVersion(newVersion: string): Promise<void> {
 	console.log(`Updated: ${pkgPath}`);
 }
 
+async function updatePluginVersion(newVersion: string): Promise<void> {
+	const pluginPath = new URL("../.claude-plugin/plugin.json", import.meta.url)
+		.pathname;
+	let plugin = await Bun.file(pluginPath).text();
+	plugin = plugin.replace(/"version": "[^"]+"/, `"version": "${newVersion}"`);
+	await Bun.write(pluginPath, plugin);
+	console.log(`Updated: ${pluginPath}`);
+}
+
 async function buildAndPublish(): Promise<void> {
 	console.log("\nPublishing to npm...");
 	// --ignore-scripts: workflow already built, skip prepublishOnly
@@ -70,7 +79,7 @@ async function gitTagAndRelease(
 	console.log("\nCommitting and tagging...");
 	await $`git config user.email "github-actions[bot]@users.noreply.github.com"`;
 	await $`git config user.name "github-actions[bot]"`;
-	await $`git add package.json assets/cc-safety-net.schema.json`;
+	await $`git add package.json .claude-plugin/plugin.json assets/cc-safety-net.schema.json`;
 
 	const hasStagedChanges = await $`git diff --cached --quiet`.nothrow();
 	if (hasStagedChanges.exitCode !== 0) {
@@ -125,6 +134,7 @@ async function main(): Promise<void> {
 	}
 
 	await updatePackageVersion(newVersion);
+	await updatePluginVersion(newVersion);
 	const changelog = await generateChangelog(`v${previous}`);
 	const contributors = await getContributors(`v${previous}`);
 	const notes = [...changelog, ...contributors];
