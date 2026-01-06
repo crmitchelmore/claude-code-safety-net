@@ -12,6 +12,7 @@ A Claude Code plugin that acts as a safety net, catching destructive git and fil
 
 - [Why This Exists](#why-this-exists)
 - [Why Hooks Instead of settings.json?](#why-hooks-instead-of-settingsjson)
+- [Prerequisites](#prerequisites)
 - [Quick Start](#quick-start)
   - [Claude Code Installation](#claude-code-installation)
   - [OpenCode Installation](#opencode-installation)
@@ -53,6 +54,10 @@ Claude Code's `.claude/settings.json` supports deny rules for Bash commands, but
 | Can't analyze interpreter one-liners | `python -c 'os.system("rm -rf /")'` executes without matching any rm rule |
 
 This hook provides **semantic command analysis**: it parses arguments, understands flag combinations, recursively analyzes shell wrappers, and distinguishes safe operations (temp directories, within cwd) from dangerous ones.
+
+## Prerequisites
+
+- **Node.js**: Version 18 or higher is required to run this plugin in *Claude Code*
 
 ## Quick Start
 
