@@ -170,6 +170,21 @@ function hasUnclosedQuotes(command: string): boolean {
 	return inSingle || inDouble;
 }
 
+const ENV_ASSIGNMENT_RE = /^[A-Za-z_][A-Za-z0-9_]*=/;
+
+function parseEnvAssignment(
+	token: string,
+): { name: string; value: string } | null {
+	if (!ENV_ASSIGNMENT_RE.test(token)) {
+		return null;
+	}
+	const eqIdx = token.indexOf("=");
+	if (eqIdx < 0) {
+		return null;
+	}
+	return { name: token.slice(0, eqIdx), value: token.slice(eqIdx + 1) };
+}
+
 export interface EnvStrippingResult {
 	tokens: string[];
 	envAssignments: Map<string, string>;
@@ -182,15 +197,15 @@ export function stripEnvAssignmentsWithInfo(
 	let i = 0;
 	while (i < tokens.length) {
 		const token = tokens[i];
-		if (token && /^[A-Za-z_][A-Za-z0-9_]*=/.test(token)) {
-			const eqIdx = token.indexOf("=");
-			const name = token.slice(0, eqIdx);
-			const value = token.slice(eqIdx + 1);
-			envAssignments.set(name, value);
-			i++;
-		} else {
+		if (!token) {
 			break;
 		}
+		const assignment = parseEnvAssignment(token);
+		if (!assignment) {
+			break;
+		}
+		envAssignments.set(assignment.name, assignment.value);
+		i++;
 	}
 	return { tokens: tokens.slice(i), envAssignments };
 }
@@ -224,8 +239,11 @@ export function stripWrappersWithInfo(
 		while (
 			result.length > 0 &&
 			result[0]?.includes("=") &&
-			!/^[A-Za-z_][A-Za-z0-9_]*=/.test(result[0] ?? "")
+			!ENV_ASSIGNMENT_RE.test(result[0] ?? "")
 		) {
+			// Conservative parsing: only strict NAME=value is treated as an env assignment.
+			// Other leading tokens that contain '=' (e.g. NAME+=value) are dropped to reach
+			// the actual executable token.
 			result = result.slice(1);
 		}
 		if (result.length === 0) break;
@@ -258,6 +276,19 @@ export function stripWrappersWithInfo(
 	return { tokens: finalTokens, envAssignments: allEnvAssignments };
 }
 
+const SUDO_OPTS_WITH_VALUE = new Set([
+	"-u",
+	"-g",
+	"-C",
+	"-D",
+	"-h",
+	"-p",
+	"-r",
+	"-t",
+	"-T",
+	"-U",
+]);
+
 function stripSudo(tokens: string[]): string[] {
 	let i = 1;
 	while (i < tokens.length) {
@@ -268,18 +299,7 @@ function stripSudo(tokens: string[]): string[] {
 			return tokens.slice(i + 1);
 		}
 		if (token.startsWith("-")) {
-			if (
-				token === "-u" ||
-				token === "-g" ||
-				token === "-C" ||
-				token === "-D" ||
-				token === "-h" ||
-				token === "-p" ||
-				token === "-r" ||
-				token === "-t" ||
-				token === "-T" ||
-				token === "-U"
-			) {
+			if (SUDO_OPTS_WITH_VALUE.has(token)) {
 				i += 2;
 			} else {
 				i++;
@@ -291,12 +311,18 @@ function stripSudo(tokens: string[]): string[] {
 	return tokens.slice(i);
 }
 
-interface EnvStripResult {
-	tokens: string[];
-	envAssignments: Map<string, string>;
-}
+const ENV_OPTS_NO_VALUE = new Set(["-i", "-0", "--null"]);
+const ENV_OPTS_WITH_VALUE = new Set([
+	"-u",
+	"--unset",
+	"-C",
+	"--chdir",
+	"-S",
+	"--split-string",
+	"-P",
+]);
 
-function stripEnvWithInfo(tokens: string[]): EnvStripResult {
+function stripEnvWithInfo(tokens: string[]): EnvStrippingResult {
 	const envAssignments = new Map<string, string>();
 	let i = 1;
 	while (i < tokens.length) {
@@ -306,17 +332,9 @@ function stripEnvWithInfo(tokens: string[]): EnvStripResult {
 		if (token === "--") {
 			return { tokens: tokens.slice(i + 1), envAssignments };
 		}
-		if (token === "-i" || token === "-0" || token === "--null") {
+		if (ENV_OPTS_NO_VALUE.has(token)) {
 			i++;
-		} else if (
-			token === "-u" ||
-			token === "--unset" ||
-			token === "-C" ||
-			token === "--chdir" ||
-			token === "-S" ||
-			token === "--split-string" ||
-			token === "-P"
-		) {
+		} else if (ENV_OPTS_WITH_VALUE.has(token)) {
 			i += 2;
 		} else if (token.startsWith("-u=") || token.startsWith("--unset=")) {
 			i++;
@@ -326,14 +344,14 @@ function stripEnvWithInfo(tokens: string[]): EnvStripResult {
 			i++;
 		} else if (token.startsWith("-")) {
 			i++;
-		} else if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(token)) {
-			const eqIdx = token.indexOf("=");
-			const name = token.slice(0, eqIdx);
-			const value = token.slice(eqIdx + 1);
-			envAssignments.set(name, value);
-			i++;
 		} else {
-			break;
+			const assignment = parseEnvAssignment(token);
+			if (assignment) {
+				envAssignments.set(assignment.name, assignment.value);
+				i++;
+			} else {
+				break;
+			}
 		}
 	}
 	return { tokens: tokens.slice(i), envAssignments };
@@ -394,10 +412,7 @@ export function extractShortOpts(tokens: string[]): Set<string> {
 }
 
 export function normalizeCommandToken(token: string): string {
-	const basename = token.includes("/")
-		? (token.split("/").pop() ?? token)
-		: token;
-	return basename.toLowerCase();
+	return getBasename(token).toLowerCase();
 }
 
 export function getBasename(token: string): string {
