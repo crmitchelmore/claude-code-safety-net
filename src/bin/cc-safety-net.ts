@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { analyzeCommand, loadConfig } from "../core/analyze.ts";
 import { redactSecrets, writeAuditLog } from "../core/audit.ts";
+import { CUSTOM_RULES_DOC } from "../core/custom-rules-doc.ts";
 import { envTruthy } from "../core/env.ts";
 import { formatBlockedMessage } from "../core/format.ts";
 import { verifyConfig } from "../core/verify-config.ts";
@@ -14,10 +15,11 @@ function printHelp(): void {
 Blocks destructive git and filesystem commands before execution.
 
 USAGE:
-  cc-safety-net -cc, --claude-code      Run as Claude Code PreToolUse hook (reads JSON from stdin)
-  cc-safety-net -vc, --verify-config    Validate config files
-  cc-safety-net -h,  --help             Show this help
-  cc-safety-net -V,  --version          Show version
+  cc-safety-net -cc, --claude-code       Run as Claude Code PreToolUse hook (reads JSON from stdin)
+  cc-safety-net -vc, --verify-config     Validate config files
+  cc-safety-net --custom-rules-doc       Print custom rules documentation
+  cc-safety-net -h,  --help              Show this help
+  cc-safety-net -V,  --version           Show version
 
 ENVIRONMENT VARIABLES:
   SAFETY_NET_STRICT=1             Fail-closed on unparseable commands
@@ -32,6 +34,10 @@ CONFIG FILES:
 
 function printVersion(): void {
 	console.log(VERSION);
+}
+
+function printCustomRulesDoc(): void {
+	console.log(CUSTOM_RULES_DOC);
 }
 
 async function handleCliFlags(): Promise<boolean> {
@@ -49,6 +55,11 @@ async function handleCliFlags(): Promise<boolean> {
 
 	if (args.includes("--verify-config") || args.includes("-vc")) {
 		process.exit(verifyConfig());
+	}
+
+	if (args.includes("--custom-rules-doc")) {
+		printCustomRulesDoc();
+		process.exit(0);
 	}
 
 	if (args.includes("--claude-code") || args.includes("-cc")) {
