@@ -41,20 +41,31 @@ cd claude-code-safety-net
 
 # Install dependencies
 bun install
+
+# Build for distribution
+bun run build
+
+# Check for all lint errors, type errors, dead code and run tests
+bun run check
 ```
 
 ### Testing Your Changes Locally
 
-After making changes, you can test your local build in Claude Code:
+## Claude Code
 
-1. **Disable the safety-net plugin** in Claude Code (if installed) and exit Claude Code completely.
+1. **Build the project**:
+   ```bash
+   bun run build
+   ```
 
-2. **Run Claude Code with the local plugin**:
+2. **Disable the safety-net plugin** in Claude Code (if installed) and exit Claude Code completely.
+
+3. **Run Claude Code with the local plugin**:
    ```bash
    claude --plugin-dir .
    ```
 
-3. **Test blocked commands** to verify your changes:
+4. **Test blocked commands** to verify your changes:
    ```bash
    # This should be blocked
    git checkout -- README.md
@@ -66,46 +77,146 @@ After making changes, you can test your local build in Claude Code:
 > [!NOTE]
 > See the [official documentation](https://docs.anthropic.com/en/docs/claude-code/plugins#test-your-plugins-locally) for more details on testing plugins locally.
 
+## OpenCode
+
+1. **Build the project**:
+   ```bash
+   bun run build
+   ```
+
+2. **Update your OpenCode config** (`~/.config/opencode/opencode.json` or `opencode.jsonc`):
+   ```json
+   {
+     "plugin": [
+       "file:///absolute/path/to/cc-safety-net/dist/index.js"
+     ]
+   }
+   ```
+   
+   For example, if your project is at `/Users/yourname/projects/cc-safety-net`:
+   ```json
+   {
+     "plugin": [
+       "file:///Users/yourname/projects/cc-safety-net/dist/index.js"
+     ]
+   }
+   ```
+
+   > **Note**: Remove `"cc-safety-net"` from the plugin array if it exists, to avoid conflicts with the npm version.
+
+3. **Restart OpenCode** to load the changes.
+
+4. **Verify the plugin is loaded:** Run `/status` and confirm that the plugin name appears as `dist`.
+
+5. **Test blocked commands** to verify your changes:
+   ```bash
+   # This should be blocked
+   git checkout -- README.md
+
+   # This should be allowed
+   git checkout -b test-branch
+   ```
+
+> [!NOTE]
+> See the [official documentation](https://opencode.ai/docs/plugins/) for more details on OpenCode plugins.
+
 ## Project Structure
 
 ```
 claude-code-safety-net/
 ├── .claude-plugin/
-│   ├── plugin.json         # Plugin metadata
-│   └── marketplace.json    # Marketplace config
+│   ├── plugin.json           # Plugin metadata
+│   └── marketplace.json      # Marketplace config
+├── .github/
+│   ├── workflows/            # CI/CD workflows
+│   │   ├── ci.yml
+│   │   ├── lint-github-actions-workflows.yml
+│   │   └── publish.yml
+│   └── pull_request_template.md
+├── .husky/
+│   └── pre-commit            # Pre-commit hook (knip + lint-staged)
+├── assets/
+│   └── cc-safety-net.schema.json  # JSON schema for config validation
+├── ast-grep/
+│   ├── rules/                # AST-grep rule definitions
+│   ├── rule-tests/           # Rule test cases
+│   └── utils/                # Shared utilities
+├── commands/
+│   ├── set-custom-rules.md   # Slash command: configure custom rules
+│   └── verify-custom-rules.md # Slash command: validate config
 ├── hooks/
-│   └── hooks.json          # Hook definitions
+│   └── hooks.json            # Hook definitions
+├── scripts/
+│   ├── build-schema.ts       # Generate JSON schema
+│   ├── generate-changelog.ts # Changelog generation
+│   └── publish.ts            # Release automation
 ├── src/
-│   ├── index.ts            # OpenCode plugin export
-│   ├── types.ts            # Shared type definitions
+│   ├── index.ts              # OpenCode plugin export
+│   ├── types.ts              # Shared type definitions
 │   ├── bin/
 │   │   └── cc-safety-net.ts  # Claude Code CLI entry point
 │   └── core/
-│       ├── analyze.ts      # Main analysis logic
-│       ├── audit.ts        # Audit logging
-│       ├── config.ts       # Config loading
-│       ├── rules-git.ts    # Git subcommand analysis
-│       ├── rules-rm.ts     # rm command analysis
-│       ├── rules-custom.ts # Custom rule evaluation
-│       ├── shell.ts        # Shell parsing utilities
-│       └── verify-config.ts # Config validator
+│       ├── analyze.ts        # Main analysis orchestration
+│       ├── analyze/          # Analysis submodules
+│       │   ├── analyze-command.ts  # Command analysis entry
+│       │   ├── constants.ts        # Shared constants
+│       │   ├── dangerous-text.ts   # Text pattern detection
+│       │   ├── find.ts             # find command analysis
+│       │   ├── interpreters.ts     # Interpreter one-liner detection
+│       │   ├── parallel.ts         # parallel command analysis
+│       │   ├── rm-flags.ts         # rm flag parsing
+│       │   ├── segment.ts          # Command segment analysis
+│       │   ├── shell-wrappers.ts   # Shell wrapper detection
+│       │   ├── tmpdir.ts           # Temp directory detection
+│       │   └── xargs.ts            # xargs command analysis
+│       ├── audit.ts          # Audit logging
+│       ├── config.ts         # Config loading
+│       ├── env.ts            # Environment variable utilities
+│       ├── format.ts         # Output formatting
+│       ├── rules-git.ts      # Git subcommand analysis
+│       ├── rules-rm.ts       # rm command analysis
+│       ├── rules-custom.ts   # Custom rule evaluation
+│       ├── shell.ts          # Shell parsing utilities
+│       └── verify-config.ts  # Config validator
 ├── tests/
-│   ├── helpers.ts          # Test utilities
-│   ├── rules-git.test.ts   # Git rule tests
-│   ├── rules-rm.test.ts    # rm rule tests
-│   └── ...                 # Other test files
-├── package.json            # Project config
-├── tsconfig.json           # TypeScript config
-└── biome.json              # Linter/formatter config
+│   ├── helpers.ts            # Test utilities
+│   ├── analyze-coverage.test.ts
+│   ├── audit.test.ts
+│   ├── config.test.ts
+│   ├── custom-rules.test.ts
+│   ├── custom-rules-integration.test.ts
+│   ├── edge-cases.test.ts
+│   ├── find.test.ts
+│   ├── parsing-helpers.test.ts
+│   ├── rules-git.test.ts
+│   ├── rules-rm.test.ts
+│   └── verify-config.test.ts
+├── .lintstagedrc.json        # Lint-staged config (biome + ast-grep)
+├── biome.json                # Linter/formatter config
+├── knip.ts                   # Dead code detection config
+├── package.json              # Project config
+├── sgconfig.yml              # AST-grep config
+├── tsconfig.json             # TypeScript config
+├── tsconfig.typecheck.json   # Type-check only config
+├── AGENTS.md                 # AI agent guidelines
+├── CLAUDE.md                 # Claude Code context
+├── CUSTOM_RULES_REFERENCE.md # Custom rules documentation
+└── README.md                 # Project documentation
 ```
 
 | Module | Purpose |
 |--------|---------|
 | `analyze.ts` | Main entry, command analysis orchestration |
+| `analyze/` | Submodules for specific analysis tasks (find, xargs, parallel, interpreters, etc.) |
+| `audit.ts` | Audit logging to `~/.cc-safety-net/logs/` |
+| `config.ts` | Config loading (`.safety-net.json`, `~/.cc-safety-net/config.json`) |
+| `env.ts` | Environment variable utilities (`envTruthy`) |
+| `format.ts` | Output formatting (`formatBlockedMessage`) |
 | `rules-git.ts` | Git rules (checkout, restore, reset, clean, push, branch, stash) |
 | `rules-rm.ts` | rm analysis (cwd-relative, temp paths, root/home detection) |
 | `rules-custom.ts` | Custom rule matching |
 | `shell.ts` | Shell parsing (`splitShellCommands`, `shlexSplit`, `stripWrappers`) |
+| `verify-config.ts` | Config file validation |
 
 ## Development Workflow
 
@@ -126,7 +237,7 @@ bun test              # Run tests
 bun test tests/rules-git.test.ts
 
 # Run tests matching pattern
-bun test --grep "checkout"
+bun test --test-name-pattern "checkout"
 
 # Build for distribution
 bun run build
@@ -241,7 +352,7 @@ When adding rules, ensure you test these edge cases:
    ```bash
    bun run check  # Must pass with no errors
    ```
-4. **Test in Claude Code** using the local plugin method described above
+4. **Test in Claude Code and OpenCode** using the local plugin method described above
 5. **Commit** with clear, descriptive messages:
    - Use present tense ("Add rule" not "Added rule")
    - Reference issues if applicable ("Fix #123")
@@ -261,7 +372,7 @@ When adding rules, ensure you test these edge cases:
 
 **Important**: Version bumping and releases are handled by maintainers only.
 
-- **Never** modify the version in `package.json` directly
+- **Never** modify the version in `package.json` or `plugin.json` directly
 - Maintainers handle versioning, tagging, and releases
 
 ## Getting Help
