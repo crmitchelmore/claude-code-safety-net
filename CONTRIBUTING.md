@@ -171,6 +171,7 @@ claude-code-safety-net/
 │       │   └── xargs.ts            # xargs command analysis
 │       ├── audit.ts          # Audit logging
 │       ├── config.ts         # Config loading
+│       ├── custom-rules-doc.ts # Custom rules documentation
 │       ├── env.ts            # Environment variable utilities
 │       ├── format.ts         # Output formatting
 │       ├── rules-git.ts      # Git subcommand analysis
@@ -200,7 +201,6 @@ claude-code-safety-net/
 ├── tsconfig.typecheck.json   # Type-check only config
 ├── AGENTS.md                 # AI agent guidelines
 ├── CLAUDE.md                 # Claude Code context
-├── CUSTOM_RULES_REFERENCE.md # Custom rules documentation
 └── README.md                 # Project documentation
 ```
 
