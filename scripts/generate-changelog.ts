@@ -2,14 +2,21 @@
 
 import { $ } from "bun";
 
+export type CommandRunner = (
+	strings: TemplateStringsArray,
+	...values: readonly string[]
+) => { text: () => Promise<string> };
+
+const DEFAULT_RUNNER: CommandRunner = $;
+
 export const EXCLUDED_AUTHORS = [
 	"actions-user",
 	"github-actions[bot]",
 	"kenryu42",
 ];
 
-/** Commit prefixes to include in changelog */
-export const INCLUDED_PREFIXES = ["feat:", "fix:"];
+/** Regex to match included commit types (with optional scope) */
+export const INCLUDED_COMMIT_PATTERN = /^(feat|fix)(\([^)]+\))?:/i;
 
 export const REPO =
 	process.env.GITHUB_REPOSITORY ?? "kenryu42/claude-code-safety-net";
@@ -23,10 +30,13 @@ const OPENCODE_PATHS = [".opencode/"];
 /**
  * Get the files changed in a commit.
  */
-async function getChangedFiles(hash: string): Promise<string[]> {
+async function getChangedFiles(
+	hash: string,
+	runner: CommandRunner = DEFAULT_RUNNER,
+): Promise<string[]> {
 	try {
 		const output =
-			await $`git diff-tree --no-commit-id --name-only -r ${hash}`.text();
+			await runner`git diff-tree --no-commit-id --name-only -r ${hash}`.text();
 		return output.split("\n").filter(Boolean);
 	} catch {
 		return [];
@@ -72,15 +82,16 @@ function classifyCommit(files: string[]): "core" | "claude-code" | "opencode" {
 export function isIncludedCommit(message: string): boolean {
 	// Remove optional hash prefix (e.g., "abc1234 " from git log output)
 	const messageWithoutHash = message.replace(/^\w+\s+/, "");
-	const lowerMessage = messageWithoutHash.toLowerCase();
 
-	return INCLUDED_PREFIXES.some((prefix) => lowerMessage.startsWith(prefix));
+	return INCLUDED_COMMIT_PATTERN.test(messageWithoutHash);
 }
 
-export async function getLatestReleasedTag(): Promise<string | null> {
+export async function getLatestReleasedTag(
+	runner: CommandRunner = DEFAULT_RUNNER,
+): Promise<string | null> {
 	try {
 		const tag =
-			await $`gh release list --exclude-drafts --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName // empty'`.text();
+			await runner`gh release list --exclude-drafts --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName // empty'`.text();
 		return tag.trim() || null;
 	} catch {
 		return null;
@@ -138,6 +149,7 @@ export function formatReleaseNotes(
 
 export async function generateChangelog(
 	previousTag: string,
+	runner: CommandRunner = DEFAULT_RUNNER,
 ): Promise<CategorizedChangelog> {
 	const result: CategorizedChangelog = {
 		core: [],
@@ -147,7 +159,7 @@ export async function generateChangelog(
 
 	try {
 		const log =
-			await $`git log ${previousTag}..HEAD --oneline --format="%h %s"`.text();
+			await runner`git log ${previousTag}..HEAD --oneline --format="%h %s"`.text();
 		const commits = log
 			.split("\n")
 			.filter((line) => line && isIncludedCommit(line));
@@ -156,7 +168,7 @@ export async function generateChangelog(
 			const hash = commit.split(" ")[0];
 			if (!hash) continue;
 
-			const files = await getChangedFiles(hash);
+			const files = await getChangedFiles(hash, runner);
 			const category = classifyCommit(files);
 
 			if (category === "core") {
@@ -174,12 +186,23 @@ export async function generateChangelog(
 	return result;
 }
 
-export async function getContributors(previousTag: string): Promise<string[]> {
+export async function getContributors(
+	previousTag: string,
+	runner: CommandRunner = DEFAULT_RUNNER,
+): Promise<string[]> {
+	return getContributorsForRepo(previousTag, REPO, runner);
+}
+
+export async function getContributorsForRepo(
+	previousTag: string,
+	repo: string,
+	runner: CommandRunner = DEFAULT_RUNNER,
+): Promise<string[]> {
 	const notes: string[] = [];
 
 	try {
 		const compare =
-			await $`gh api "/repos/${REPO}/compare/${previousTag}...HEAD" --jq '.commits[] | {login: .author.login, message: .commit.message}'`.text();
+			await runner`gh api "/repos/${repo}/compare/${previousTag}...HEAD" --jq '.commits[] | {login: .author.login, message: .commit.message}'`.text();
 		const contributors = new Map<string, string[]>();
 
 		for (const line of compare.split("\n").filter(Boolean)) {
@@ -215,21 +238,30 @@ export async function getContributors(previousTag: string): Promise<string[]> {
 	return notes;
 }
 
-async function main(): Promise<void> {
-	const previousTag = await getLatestReleasedTag();
+export type RunChangelogOptions = {
+	runner?: CommandRunner;
+	log?: (message: string) => void;
+};
+
+export async function runChangelog(
+	options: RunChangelogOptions = {},
+): Promise<void> {
+	const runner = options.runner ?? DEFAULT_RUNNER;
+	const log = options.log ?? console.log;
+	const previousTag = await getLatestReleasedTag(runner);
 
 	if (!previousTag) {
-		console.log("Initial release");
+		log("Initial release");
 		return;
 	}
 
-	const changelog = await generateChangelog(previousTag);
-	const contributors = await getContributors(previousTag);
+	const changelog = await generateChangelog(previousTag, runner);
+	const contributors = await getContributorsForRepo(previousTag, REPO, runner);
 	const notes = formatReleaseNotes(changelog, contributors);
 
-	console.log(notes.join("\n"));
+	log(notes.join("\n"));
 }
 
 if (import.meta.main) {
-	main();
+	runChangelog();
 }
