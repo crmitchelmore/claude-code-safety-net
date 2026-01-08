@@ -1,6 +1,5 @@
 ---
 description: Verify custom rules for Safety Net
-allowed-tools: Bash, Read, Write, AskUserQuestion
 ---
 
 You are helping the user verify the custom rules config file.
@@ -12,5 +11,6 @@ Run `npx -y cc-safety-net --verify-config` to check current validation status
 If the config has validation errors:
 1. Show the specific validation errors
 2. Run `npx -y cc-safety-net --custom-rules-doc` to read the schema documentation
-3. Use AskUserQuestion tool to offer fixes with your best suggestions
-4. After fixing, run `npx -y cc-safety-net --verify-config` to verify again
+3. Offer to fix them with your best suggestion
+4. Ask for confirmation before proceeding
+5. After fixing, run `npx -y cc-safety-net --verify-config` to verify again

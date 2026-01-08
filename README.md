@@ -57,7 +57,7 @@ This hook provides **semantic command analysis**: it parses arguments, understan
 
 ## Prerequisites
 
-- **Node.js**: Version 18 or higher is required to run this plugin in *Claude Code*
+- **Node.js**: Version 18 or higher is required to run this plugin
 
 ## Quick Start
 
@@ -87,8 +87,8 @@ Paste this into any LLM agent (Claude Code, OpenCode, Cursor, etc.):
 Install the cc-safety-net plugin in `~/.config/opencode/opencode.json` (or `.jsonc`) according to the schema at: https://opencode.ai/config.json
 
 Then copy the following files to `~/.config/opencode/command/`:
-- https://raw.githubusercontent.com/kenryu42/claude-code-safety-net/main/commands/set-custom-rules.md
-- https://raw.githubusercontent.com/kenryu42/claude-code-safety-net/main/commands/verify-custom-rules.md
+- https://raw.githubusercontent.com/kenryu42/claude-code-safety-net/main/.opencode/command/set-custom-rules.md
+- https://raw.githubusercontent.com/kenryu42/claude-code-safety-net/main/.opencode/command/verify-custom-rules.md
 ```
 
 **Option B: Manual setup**
