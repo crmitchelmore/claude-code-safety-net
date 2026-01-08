@@ -101,7 +101,7 @@ Then copy the following files to `~/.config/opencode/command/`:
   }
   ```
 
-2. **Copy the [commands](commands) to `~/.config/opencode/command/`**
+2. **Copy the [commands](.opencode/command) to `~/.config/opencode/command/`**
 
 ## Commands Blocked
 
