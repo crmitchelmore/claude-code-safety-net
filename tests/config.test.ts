@@ -13,9 +13,13 @@ import {
 
 describe("config validation", () => {
 	let tempDir: string;
+	let userConfigDir: string;
+	let loadOptions: LoadConfigOptions;
 
 	beforeEach(() => {
 		tempDir = mkdtempSync(join(tmpdir(), "safety-net-config-"));
+		userConfigDir = join(tempDir, ".cc-safety-net");
+		loadOptions = { userConfigDir };
 	});
 
 	afterEach(() => {
@@ -33,7 +37,7 @@ describe("config validation", () => {
 
 	function loadFromProject(data: unknown) {
 		writeProjectConfig(data);
-		return loadConfig(tempDir);
+		return loadConfig(tempDir, loadOptions);
 	}
 
 	describe("valid configs", () => {
