@@ -12,7 +12,7 @@ import type {
 	HookOutput,
 } from "../types.ts";
 
-const VERSION = "0.4.1";
+const VERSION = "0.5.0";
 
 function printHelp(): void {
 	console.log(`cc-safety-net v${VERSION}
