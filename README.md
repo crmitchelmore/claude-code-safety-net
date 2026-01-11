@@ -3,10 +3,10 @@
 [![CI](https://github.com/kenryu42/claude-code-safety-net/actions/workflows/ci.yml/badge.svg)](https://github.com/kenryu42/claude-code-safety-net/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/github/kenryu42/claude-code-safety-net/branch/main/graph/badge.svg?token=C9QTION6ZF)](https://codecov.io/github/kenryu42/claude-code-safety-net)
 [![Version](https://img.shields.io/github/v/tag/kenryu42/claude-code-safety-net?label=version&color=blue)](https://github.com/kenryu42/claude-code-safety-net)
-[![Claude Code](https://img.shields.io/badge/Claude%20Code-Plugin-orange)](https://platform.claude.com/docs/en/agent-sdk/plugins)
-[![OpenCode](https://img.shields.io/badge/OpenCode-Plugin-black)](https://opencode.ai/docs/plugins/)
-[![Gemini CLI](https://img.shields.io/badge/Gemini-CLI-lightblue)](https://github.com/kenryu42/gemini-safety-net)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-D27656)](https://platform.claude.com/docs/en/agent-sdk/plugins)
+[![OpenCode](https://img.shields.io/badge/OpenCode-black)](https://opencode.ai/docs/plugins/)
+[![Gemini CLI](https://img.shields.io/badge/Gemini%20CLI-678AE3)](https://github.com/kenryu42/gemini-safety-net)
+[![License: MIT](https://img.shields.io/badge/License-MIT-red.svg)](https://opensource.org/licenses/MIT)
 
 <div align="center">
 
@@ -49,7 +49,7 @@ A Claude Code plugin that acts as a safety net, catching destructive git and fil
 ## Why This Exists
 
 We learned the [hard way](https://www.reddit.com/r/ClaudeAI/comments/1pgxckk/claude_cli_deleted_my_entire_home_directory_wiped/) that instructions aren't enough to keep AI agents in check.
-After Claude Code silently wiped out hours of progress with a single `rm -rf ~/` or `git checkout --`, it became evident that **"soft"** rules in an `CLAUDE.md` or `AGENTS.md` file cannot replace **hard** technical constraints.
+After Claude Code silently wiped out hours of progress with a single `rm -rf ~/` or `git checkout --`, it became evident that **soft** rules in an `CLAUDE.md` or `AGENTS.md` file cannot replace **hard** technical constraints.
 The current approach is to use a dedicated hook to programmatically prevent agents from running destructive commands.
 
 ## Why Use This Instead of Permission Deny Rules?
