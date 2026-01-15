@@ -218,6 +218,8 @@ Then start Copilot CLI from that repo as usual:
 copilot
 ```
 
+**Global hooks:** Copilot CLI currently loads hooks from the repo’s git root only (`<repo>/.github/hooks/*.json`). It does not scan `~/.github/hooks`, `~/.copilot/hooks`, or similar.
+
 ---
 
 ### Gemini CLI Installation
