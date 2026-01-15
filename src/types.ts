@@ -90,28 +90,43 @@ export interface GeminiHookOutput {
 
 /** GitHub Copilot CLI hook input format (best-effort; schema is evolving) */
 export interface CopilotHookInput {
+  timestamp?: number;
+  cwd?: string;
+
   hookEventName?: string;
   hook_event_name?: string;
   eventName?: string;
   event_name?: string;
-  cwd?: string;
+
   toolName?: string;
   tool_name?: string;
+
+  toolArgs?: {
+    command?: string;
+    description?: string;
+    [key: string]: unknown;
+  };
+
   toolInput?: {
     command?: string;
     [key: string]: unknown;
   };
+
   tool_input?: {
     command?: string;
     [key: string]: unknown;
   };
+
   [key: string]: unknown;
 }
 
 /** GitHub Copilot CLI hook output format */
 export interface CopilotHookOutput {
-  permissionDecision: 'deny';
-  permissionDecisionReason: string;
+  permissionDecision?: 'allow' | 'deny' | 'ask';
+  permissionDecisionReason?: string;
+  modifiedArgs?: unknown;
+  additionalContext?: string;
+  suppressOutput?: boolean;
 }
 
 /** Options for command analysis */

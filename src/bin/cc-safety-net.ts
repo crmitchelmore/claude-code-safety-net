@@ -227,7 +227,16 @@ async function runGeminiCLIHook(): Promise<void> {
   }
 }
 
-function outputCopilotDeny(reason: string, command?: string, segment?: string): void {
+function shellSingleQuote(text: string): string {
+  return `'${text.replaceAll("'", "'\\''")}'`;
+}
+
+function outputCopilotDeny(
+  reason: string,
+  command?: string,
+  segment?: string,
+  toolArgs?: unknown,
+): void {
   const message = formatBlockedMessage({
     reason,
     command,
@@ -235,9 +244,18 @@ function outputCopilotDeny(reason: string, command?: string, segment?: string): 
     redact: redactSecrets,
   });
 
+  // Copilot CLI currently applies `modifiedArgs` to the tool call, but does not
+  // consistently enforce `permissionDecision` for command-based hooks.
+  const safeCommand = `printf '%s\n' ${shellSingleQuote(message)} >&2; exit 1`;
+  const modifiedArgs =
+    toolArgs && typeof toolArgs === 'object'
+      ? { ...(toolArgs as Record<string, unknown>), command: safeCommand }
+      : { command: safeCommand };
+
   const output: CopilotHookOutput = {
     permissionDecision: 'deny',
     permissionDecisionReason: message,
+    modifiedArgs,
   };
 
   console.log(JSON.stringify(output));
@@ -297,21 +315,19 @@ async function runCopilotCLIHook(): Promise<void> {
     return;
   }
 
-  const eventName =
-    input.hookEventName ??
-    input.hook_event_name ??
-    input.eventName ??
-    input.event_name ??
-    getString(input, 'hookEventName') ??
-    getString(input, 'hook_event_name') ??
-    getString(input, 'eventName') ??
-    getString(input, 'event_name');
+  const toolName =
+    input.toolName ??
+    input.tool_name ??
+    getString(input, 'toolName') ??
+    getString(input, 'tool_name');
 
-  if (eventName && eventName.toLowerCase() !== 'pretooluse') {
+  if (toolName && toolName.toLowerCase() !== 'bash') {
     return;
   }
 
   const command =
+    input.toolArgs?.command ??
+    getNestedString(input, 'toolArgs', 'command') ??
     input.toolInput?.command ??
     input.tool_input?.command ??
     getNestedString(input, 'toolInput', 'command') ??
@@ -341,7 +357,11 @@ async function runCopilotCLIHook(): Promise<void> {
     if (sessionId) {
       writeAuditLog(sessionId, command, result.segment, result.reason, cwd);
     }
-    outputCopilotDeny(result.reason, command, result.segment);
+    const toolArgs =
+      input.toolArgs ??
+      (input as { toolInput?: unknown }).toolInput ??
+      (input as { tool_input?: unknown }).tool_input;
+    outputCopilotDeny(result.reason, command, result.segment, toolArgs);
   }
 }
 

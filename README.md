@@ -194,6 +194,10 @@ Install the cc-safety-net plugin in `~/.config/opencode/opencode.json` (or `.jso
 
 Create a hook file in your repo at `.github/hooks/cc-safety-net.json`:
 
+> [!NOTE]
+> Copilot CLI currently executes repo hooks, but does **not** reliably enforce `permissionDecision: "deny"` from command-based hooks (as of Copilot CLI 0.0.382).
+> This integration is still useful to prove hook execution and will be ready to hard-block once Copilot enforces deny decisions.
+
 ```json
 {
   "version": 1,
