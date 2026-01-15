@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { verifyConfig as main, type VerifyConfigOptions } from '../src/core/verify-config.ts';
+import { verifyConfig as main, type VerifyConfigOptions } from '../src/bin/verify-config.ts';
 
 describe('verify-config', () => {
   let tempDir: string;
