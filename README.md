@@ -25,6 +25,7 @@ A Claude Code plugin that acts as a safety net, catching destructive git and fil
 - [Quick Start](#quick-start)
   - [Claude Code Installation](#claude-code-installation)
   - [OpenCode Installation](#opencode-installation)
+  - [GitHub Copilot CLI Installation](#github-copilot-cli-installation)
   - [Gemini CLI Installation](#gemini-cli-installation)
 - [Commands Blocked](#commands-blocked)
 - [Commands Allowed](#commands-allowed)
@@ -186,6 +187,32 @@ Install the cc-safety-net plugin in `~/.config/opencode/opencode.json` (or `.jso
     "plugin": ["cc-safety-net"]
   }
   ```
+
+---
+
+### GitHub Copilot CLI Installation
+
+Create a hook file in your repo at `.github/hooks/cc-safety-net.json`:
+
+```json
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "type": "command",
+        "bash": "npx -y cc-safety-net --copilot-cli"
+      }
+    ]
+  }
+}
+```
+
+Then start Copilot CLI from that repo as usual:
+
+```bash
+copilot
+```
 
 ---
 
