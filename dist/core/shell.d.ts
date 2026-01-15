@@ -1,0 +1,15 @@
+export declare function splitShellCommands(command: string): string[][];
+export interface EnvStrippingResult {
+    tokens: string[];
+    envAssignments: Map<string, string>;
+}
+export declare function stripEnvAssignmentsWithInfo(tokens: string[]): EnvStrippingResult;
+export interface WrapperStrippingResult {
+    tokens: string[];
+    envAssignments: Map<string, string>;
+}
+export declare function stripWrappers(tokens: string[]): string[];
+export declare function stripWrappersWithInfo(tokens: string[]): WrapperStrippingResult;
+export declare function extractShortOpts(tokens: string[]): Set<string>;
+export declare function normalizeCommandToken(token: string): string;
+export declare function getBasename(token: string): string;

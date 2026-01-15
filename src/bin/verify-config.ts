@@ -9,7 +9,7 @@ import {
   getUserConfigPath,
   type ValidationResult,
   validateConfigFile,
-} from './config.ts';
+} from '../core/config.ts';
 
 export interface VerifyConfigOptions {
   userConfigPath?: string;

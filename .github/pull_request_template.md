@@ -1,3 +1,12 @@
+<!-- 
+Before submitting: Did you discuss this change first?
+
+New features and new detection rules should be discussed in an issue BEFORE implementation.
+This saves time for everyone. See CONTRIBUTING.md for details.
+
+Quick fixes (typos, obvious bugs) can skip the issue step.
+-->
+
 ## Summary
 
 <!-- Brief description of what this PR does. 1-3 bullet points. -->
@@ -26,18 +35,16 @@
 bun run check
 ```
 
-## Related Issues
+## Related Issue
 
-<!-- Link related issues. Use "Closes #123" to auto-close on merge. -->
+<!-- Link the issue where this was discussed. Use "Closes #123" to auto-close on merge. -->
 
 ### PR Checklist
 
+- [ ] I have read the [CONTRIBUTING.md](../CONTRIBUTING.md)
 - [ ] Code follows project conventions (type hints, naming, etc.)
 - [ ] `bun run check` passes (lint, types, dead code, rules, tests)
 - [ ] Tests added for new rules (minimum 90% coverage required)
 - [ ] Tested locally with Claude Code, Opencode
 - [ ] Updated documentation if needed (README, AGENTS.md)
 - [ ] No version changes in `package.json`
-
-
-<!-- Closes # -->
