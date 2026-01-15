@@ -5,6 +5,7 @@ log*
 plan-*.md
 *-plan-*.md
 .safety-net.json
+.sisyphus/
 
 # --- Node.js ---
 node_modules/
