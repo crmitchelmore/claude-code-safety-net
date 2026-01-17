@@ -2536,7 +2536,7 @@ async function runGeminiCLIHook() {
 }
 
 // src/bin/help.ts
-var version = "0.5.1";
+var version = "0.6.0";
 function printHelp() {
   console.log(`cc-safety-net v${version}
 
