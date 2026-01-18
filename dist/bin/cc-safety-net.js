@@ -2470,6 +2470,807 @@ Duplicate rule names (case-insensitive) → project wins.
 Invalid config → silent fallback to built-in rules only. No custom rules applied.
 `;
 
+// src/bin/doctor/activity.ts
+import { existsSync as existsSync3, readdirSync, readFileSync as readFileSync2 } from "node:fs";
+import { homedir as homedir4 } from "node:os";
+import { join as join3 } from "node:path";
+function formatRelativeTime(date) {
+  const diff = Date.now() - date.getTime();
+  const minutes = Math.floor(diff / (1000 * 60));
+  const hours = Math.floor(diff / (1000 * 60 * 60));
+  const days = Math.floor(hours / 24);
+  if (days > 0)
+    return `${days}d ago`;
+  if (hours > 0)
+    return `${hours}h ago`;
+  if (minutes > 0)
+    return `${minutes}m ago`;
+  return "just now";
+}
+function getActivitySummary(days = 7) {
+  const logsDir = join3(homedir4(), ".cc-safety-net", "logs");
+  if (!existsSync3(logsDir)) {
+    return { totalBlocked: 0, sessionCount: 0, recentEntries: [] };
+  }
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+  const entries = [];
+  let sessionCount = 0;
+  let files;
+  try {
+    files = readdirSync(logsDir).filter((f) => f.endsWith(".jsonl"));
+  } catch {
+    return { totalBlocked: 0, sessionCount: 0, recentEntries: [] };
+  }
+  for (const file of files) {
+    try {
+      const content = readFileSync2(join3(logsDir, file), "utf-8");
+      const lines = content.trim().split(`
+`).filter(Boolean);
+      let hasRecentEntry = false;
+      for (const line of lines) {
+        try {
+          const entry = JSON.parse(line);
+          const ts = new Date(entry.ts).getTime();
+          if (ts >= cutoff) {
+            entries.push(entry);
+            hasRecentEntry = true;
+          }
+        } catch {}
+      }
+      if (hasRecentEntry) {
+        sessionCount++;
+      }
+    } catch {}
+  }
+  entries.sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime());
+  const recentEntries = entries.slice(0, 3).map((e) => ({
+    timestamp: e.ts,
+    command: e.command,
+    reason: e.reason,
+    relativeTime: formatRelativeTime(new Date(e.ts))
+  }));
+  return {
+    totalBlocked: entries.length,
+    sessionCount,
+    recentEntries,
+    oldestEntry: entries.at(-1)?.ts,
+    newestEntry: entries.at(0)?.ts
+  };
+}
+
+// src/bin/doctor/config.ts
+import { existsSync as existsSync4, readFileSync as readFileSync3 } from "node:fs";
+function getConfigSourceInfo(path) {
+  if (!existsSync4(path)) {
+    return { path, exists: false, valid: false, ruleCount: 0 };
+  }
+  const validation = validateConfigFile(path);
+  if (validation.errors.length > 0) {
+    return {
+      path,
+      exists: true,
+      valid: false,
+      ruleCount: 0,
+      errors: validation.errors
+    };
+  }
+  return {
+    path,
+    exists: true,
+    valid: true,
+    ruleCount: validation.ruleNames.size
+  };
+}
+function isValidRule(rule) {
+  if (typeof rule !== "object" || rule === null)
+    return false;
+  const r = rule;
+  return typeof r.name === "string" && typeof r.command === "string" && Array.isArray(r.block_args) && typeof r.reason === "string";
+}
+function loadSingleConfigRules(path) {
+  if (!existsSync4(path))
+    return [];
+  try {
+    const content = readFileSync3(path, "utf-8");
+    if (!content.trim())
+      return [];
+    const parsed = JSON.parse(content);
+    if (!Array.isArray(parsed.rules))
+      return [];
+    return parsed.rules.filter(isValidRule);
+  } catch {
+    return [];
+  }
+}
+function mergeRulesWithTracking(userRules, projectRules) {
+  const projectRuleNames = new Set(projectRules.map((r) => r.name.toLowerCase()));
+  const shadowedRules = [];
+  const effectiveRules = [];
+  for (const rule of userRules) {
+    if (projectRuleNames.has(rule.name.toLowerCase())) {
+      shadowedRules.push({ name: rule.name, shadowedBy: "project" });
+    } else {
+      effectiveRules.push({
+        source: "user",
+        name: rule.name,
+        command: rule.command,
+        subcommand: rule.subcommand,
+        blockArgs: rule.block_args,
+        reason: rule.reason
+      });
+    }
+  }
+  for (const rule of projectRules) {
+    effectiveRules.push({
+      source: "project",
+      name: rule.name,
+      command: rule.command,
+      subcommand: rule.subcommand,
+      blockArgs: rule.block_args,
+      reason: rule.reason
+    });
+  }
+  return { effectiveRules, shadowedRules };
+}
+function getConfigInfo(cwd, options) {
+  const userPath = options?.userConfigPath ?? getUserConfigPath();
+  const projectPath = options?.projectConfigPath ?? getProjectConfigPath(cwd);
+  const userConfig = getConfigSourceInfo(userPath);
+  const projectConfig = getConfigSourceInfo(projectPath);
+  const userRules = loadSingleConfigRules(userPath);
+  const projectRules = loadSingleConfigRules(projectPath);
+  const { effectiveRules, shadowedRules } = mergeRulesWithTracking(userRules, projectRules);
+  return {
+    userConfig,
+    projectConfig,
+    effectiveRules,
+    shadowedRules
+  };
+}
+
+// src/bin/doctor/environment.ts
+var ENV_VARS = [
+  {
+    name: "SAFETY_NET_STRICT",
+    description: "Fail-closed on unparseable commands",
+    defaultBehavior: "permissive"
+  },
+  {
+    name: "SAFETY_NET_PARANOID",
+    description: "Enable all paranoid checks",
+    defaultBehavior: "off"
+  },
+  {
+    name: "SAFETY_NET_PARANOID_RM",
+    description: "Block rm -rf even within cwd",
+    defaultBehavior: "off"
+  },
+  {
+    name: "SAFETY_NET_PARANOID_INTERPRETERS",
+    description: "Block interpreter one-liners",
+    defaultBehavior: "off"
+  }
+];
+function getEnvironmentInfo() {
+  return ENV_VARS.map((v) => ({
+    ...v,
+    value: process.env[v.name],
+    isSet: v.name in process.env
+  }));
+}
+
+// src/bin/doctor/format.ts
+var useColor = process.stdout.isTTY && !process.env.NO_COLOR;
+var colors = {
+  green: (s) => useColor ? `\x1B[32m${s}\x1B[0m` : s,
+  yellow: (s) => useColor ? `\x1B[33m${s}\x1B[0m` : s,
+  red: (s) => useColor ? `\x1B[31m${s}\x1B[0m` : s,
+  dim: (s) => useColor ? `\x1B[2m${s}\x1B[0m` : s,
+  bold: (s) => useColor ? `\x1B[1m${s}\x1B[0m` : s
+};
+var STATUS_ICONS = {
+  pass: "✅",
+  warn: "⚠️",
+  fail: "❌",
+  info: "ℹ️"
+};
+function formatHeader() {
+  return `Safety Net Doctor
+═════════════════`;
+}
+function formatHooksSection(hooks) {
+  const lines = [];
+  const anyConfigured = hooks.some((h) => h.configured);
+  const anyFailed = hooks.some((h) => h.selfTest && h.selfTest.failed > 0);
+  const status = anyFailed ? "fail" : anyConfigured ? "pass" : "warn";
+  const icon = STATUS_ICONS[status];
+  lines.push(`${icon} Hook Integration & Self-Test`);
+  const platformNames = {
+    "claude-code": "Claude Code",
+    opencode: "OpenCode",
+    "gemini-cli": "Gemini CLI"
+  };
+  for (const hook of hooks) {
+    const platformName = platformNames[hook.platform];
+    if (hook.configured) {
+      lines.push(`   ${platformName}: ${hook.method}`);
+      if (hook.selfTest) {
+        lines.push(`      Self-test: ${hook.selfTest.passed}/${hook.selfTest.total} passed`);
+        for (const result of hook.selfTest.results) {
+          const resultIcon = result.passed ? "✓" : "✗";
+          const outcome = result.actual === "blocked" ? "blocked" : "allowed";
+          lines.push(`      ${resultIcon} ${result.description.padEnd(20)} → ${outcome}`);
+        }
+      }
+    } else {
+      lines.push(`   ${platformName}: Not configured (skipped self-test)`);
+      if (hook.error) {
+        lines.push(`      Error: ${hook.error}`);
+      }
+    }
+  }
+  return lines.join(`
+`);
+}
+function formatRulesTable(rules) {
+  if (rules.length === 0) {
+    return "   (no custom rules)";
+  }
+  const headers = ["Source", "Name", "Command", "Block Args"];
+  const rows = rules.map((r) => [
+    r.source,
+    r.name,
+    r.subcommand ? `${r.command} ${r.subcommand}` : r.command,
+    r.blockArgs.join(", ")
+  ]);
+  const colWidths = headers.map((h, i) => {
+    const maxDataWidth = Math.max(...rows.map((r) => r[i]?.length ?? 0));
+    return Math.max(h.length, maxDataWidth);
+  });
+  const pad = (s, w) => s.padEnd(w);
+  const line = (char, corners) => corners[0] + colWidths.map((w) => char.repeat(w + 2)).join(corners[1]) + corners[2];
+  const formatRow = (cells) => `│ ${cells.map((c, i) => pad(c, colWidths[i] ?? 0)).join(" │ ")} │`;
+  const tableLines = [
+    `   ${line("─", ["┌", "┬", "┐"])}`,
+    `   ${formatRow(headers)}`,
+    `   ${line("─", ["├", "┼", "┤"])}`,
+    ...rows.map((r) => `   ${formatRow(r)}`),
+    `   ${line("─", ["└", "┴", "┘"])}`
+  ];
+  return tableLines.join(`
+`);
+}
+function formatConfigSection(report) {
+  const lines = [];
+  const hasErrors = (report.userConfig.errors?.length ?? 0) > 0 || (report.projectConfig.errors?.length ?? 0) > 0;
+  const icon = hasErrors ? STATUS_ICONS.fail : STATUS_ICONS.pass;
+  lines.push(`${icon} Configuration`);
+  if (report.userConfig.exists) {
+    if (report.userConfig.valid) {
+      lines.push(`   User config:    ${report.userConfig.path} (${report.userConfig.ruleCount} rules)`);
+    } else {
+      lines.push(`   User config:    ${report.userConfig.path} (invalid)`);
+      for (const err of report.userConfig.errors ?? []) {
+        lines.push(`      Error: ${err}`);
+      }
+    }
+  } else {
+    lines.push(`   User config:    ${report.userConfig.path} (not found)`);
+  }
+  if (report.projectConfig.exists) {
+    if (report.projectConfig.valid) {
+      lines.push(`   Project config: ${report.projectConfig.path} (${report.projectConfig.ruleCount} rules)`);
+    } else {
+      lines.push(`   Project config: ${report.projectConfig.path} (invalid)`);
+      for (const err of report.projectConfig.errors ?? []) {
+        lines.push(`      Error: ${err}`);
+      }
+    }
+  } else {
+    lines.push("   Project config: ./.safety-net.json (not found)");
+  }
+  lines.push("");
+  if (report.effectiveRules.length > 0) {
+    lines.push(`   Effective rules (${report.effectiveRules.length} total):`);
+    lines.push(formatRulesTable(report.effectiveRules));
+  } else {
+    lines.push("   Effective rules: (none - using built-in rules only)");
+  }
+  for (const shadow of report.shadowedRules) {
+    lines.push("");
+    lines.push(`   ${STATUS_ICONS.warn} Note: Project rule "${shadow.name}" shadows user rule with same name`);
+  }
+  return lines.join(`
+`);
+}
+function formatEnvironmentSection(envVars) {
+  const lines = [];
+  lines.push(`${STATUS_ICONS.pass} Environment`);
+  for (const v of envVars) {
+    const value = v.isSet ? v.value : `not set (default: ${v.defaultBehavior})`;
+    lines.push(`   ${v.name}: ${value}`);
+  }
+  return lines.join(`
+`);
+}
+function formatActivitySection(activity) {
+  const lines = [];
+  const hasActivity = activity.totalBlocked > 0;
+  const icon = hasActivity ? STATUS_ICONS.pass : STATUS_ICONS.warn;
+  lines.push(`${icon} Recent Activity`);
+  if (activity.totalBlocked === 0) {
+    lines.push("   No blocked commands in the last 7 days");
+    lines.push("   Tip: This is normal for new installations");
+  } else {
+    lines.push(`   ${activity.totalBlocked} commands blocked across ${activity.sessionCount} sessions`);
+    lines.push("");
+    lines.push("   Latest:");
+    for (const entry of activity.recentEntries) {
+      const cmd = entry.command.length > 40 ? `${entry.command.slice(0, 37)}...` : entry.command;
+      lines.push(`   • ${entry.relativeTime.padEnd(8)} ${cmd}`);
+    }
+  }
+  return lines.join(`
+`);
+}
+function formatPermissionsSection(permissions) {
+  const lines = [];
+  const configOk = permissions.configDir.writable || !permissions.configDir.exists;
+  const logOk = permissions.logDir.writable || !permissions.logDir.exists;
+  const allOk = configOk && logOk;
+  const icon = allOk ? STATUS_ICONS.pass : STATUS_ICONS.fail;
+  lines.push(`${icon} Permissions`);
+  const configStatus = formatDirStatus(permissions.configDir);
+  lines.push(`   Config dir:  ${shortenPath(permissions.configDir.path)} ${configStatus}`);
+  const logStatus = formatDirStatus(permissions.logDir);
+  lines.push(`   Log dir:     ${shortenPath(permissions.logDir.path)} ${logStatus}`);
+  return lines.join(`
+`);
+}
+function formatDirStatus(dir) {
+  if (!dir.exists) {
+    return "(not created yet)";
+  }
+  if (!dir.writable) {
+    return "(not writable!)";
+  }
+  if (dir.fileCount !== undefined) {
+    return `(writable, ${dir.fileCount} files)`;
+  }
+  return "(writable)";
+}
+function shortenPath(path) {
+  const home = process.env.HOME;
+  if (home && path.startsWith(home)) {
+    return `~${path.slice(home.length)}`;
+  }
+  return path;
+}
+function formatUpdateSection(update) {
+  const lines = [];
+  lines.push(`${STATUS_ICONS.warn} Update Available`);
+  lines.push(`   Installed: ${update.currentVersion}`);
+  lines.push(`   Latest:    ${update.latestVersion}`);
+  lines.push("");
+  lines.push("   Run: bunx cc-safety-net@latest doctor");
+  lines.push("   Or:  npx cc-safety-net@latest doctor");
+  return lines.join(`
+`);
+}
+function formatSystemInfoSection(system) {
+  const lines = [];
+  lines.push(`${STATUS_ICONS.info} System Info`);
+  lines.push(`   Version:   ${system.version}`);
+  lines.push(`   Runtime:   ${system.runtime}`);
+  lines.push(`   Platform:  ${system.platform}`);
+  if (system.shell) {
+    lines.push(`   Shell:     ${system.shell}`);
+  }
+  return lines.join(`
+`);
+}
+function formatSummary(report) {
+  const hooksFailed = report.hooks.every((h) => !h.configured);
+  const selfTestFailed = report.hooks.some((h) => h.selfTest && h.selfTest.failed > 0);
+  const configFailed = (report.userConfig.errors?.length ?? 0) > 0 || (report.projectConfig.errors?.length ?? 0) > 0;
+  const failures = [hooksFailed, selfTestFailed, configFailed].filter(Boolean).length;
+  let warnings = 0;
+  if (report.update.updateAvailable)
+    warnings++;
+  if (report.activity.totalBlocked === 0)
+    warnings++;
+  warnings += report.shadowedRules.length;
+  if (failures > 0) {
+    return colors.red(`
+${failures} check(s) failed.`);
+  }
+  if (warnings > 0) {
+    return colors.yellow(`
+All checks passed with ${warnings} warning(s).`);
+  }
+  return colors.green(`
+All checks passed.`);
+}
+
+// src/bin/doctor/hooks.ts
+import { existsSync as existsSync5, readFileSync as readFileSync4 } from "node:fs";
+import { homedir as homedir5, tmpdir as tmpdir3 } from "node:os";
+import { join as join4 } from "node:path";
+var SELF_TEST_CASES = [
+  { command: "git reset --hard", description: "git reset --hard", expectBlocked: true },
+  { command: "rm -rf /", description: "rm -rf /", expectBlocked: true },
+  { command: "rm -rf ./node_modules", description: "rm in cwd (safe)", expectBlocked: false }
+];
+var SELF_TEST_CONFIG = { version: 1, rules: [] };
+function runSelfTest() {
+  const selfTestCwd = join4(tmpdir3(), "cc-safety-net-self-test");
+  const results = SELF_TEST_CASES.map((tc) => {
+    const result = analyzeCommand(tc.command, {
+      cwd: selfTestCwd,
+      config: SELF_TEST_CONFIG,
+      strict: false,
+      paranoidRm: false,
+      paranoidInterpreters: false
+    });
+    const wasBlocked = result !== null;
+    const expected = tc.expectBlocked ? "blocked" : "allowed";
+    const actual = wasBlocked ? "blocked" : "allowed";
+    return {
+      command: tc.command,
+      description: tc.description,
+      expected,
+      actual,
+      passed: expected === actual,
+      reason: result?.reason
+    };
+  });
+  const passed = results.filter((r) => r.passed).length;
+  const failed = results.filter((r) => !r.passed).length;
+  return { passed, failed, total: results.length, results };
+}
+function stripJsonComments(content) {
+  let result = "";
+  let i = 0;
+  let inString = false;
+  let isEscaped = false;
+  let lastCommaIndex = -1;
+  while (i < content.length) {
+    const char = content[i];
+    const next = content[i + 1];
+    if (isEscaped) {
+      result += char;
+      isEscaped = false;
+      i++;
+      continue;
+    }
+    if (char === '"' && !inString) {
+      inString = true;
+      lastCommaIndex = -1;
+      result += char;
+      i++;
+      continue;
+    }
+    if (char === '"' && inString) {
+      inString = false;
+      result += char;
+      i++;
+      continue;
+    }
+    if (char === "\\" && inString) {
+      isEscaped = true;
+      result += char;
+      i++;
+      continue;
+    }
+    if (inString) {
+      result += char;
+      i++;
+      continue;
+    }
+    if (char === "/" && next === "/") {
+      while (i < content.length && content[i] !== `
+`) {
+        i++;
+      }
+      continue;
+    }
+    if (char === "/" && next === "*") {
+      i += 2;
+      while (i < content.length - 1) {
+        if (content[i] === "*" && content[i + 1] === "/") {
+          i += 2;
+          break;
+        }
+        i++;
+      }
+      continue;
+    }
+    if (char === ",") {
+      lastCommaIndex = result.length;
+      result += char;
+      i++;
+      continue;
+    }
+    if (char === "}" || char === "]") {
+      if (lastCommaIndex !== -1) {
+        const between = result.slice(lastCommaIndex + 1);
+        if (/^\s*$/.test(between)) {
+          result = result.slice(0, lastCommaIndex) + between;
+        }
+      }
+      lastCommaIndex = -1;
+      result += char;
+      i++;
+      continue;
+    }
+    if (!/\s/.test(char)) {
+      lastCommaIndex = -1;
+    }
+    result += char;
+    i++;
+  }
+  return result;
+}
+function detectClaudeCode(homeDir) {
+  const settingsPath = join4(homeDir, ".claude", "settings.json");
+  if (existsSync5(settingsPath)) {
+    try {
+      const settings = JSON.parse(readFileSync4(settingsPath, "utf-8"));
+      const pluginKey = "safety-net@cc-marketplace";
+      if (settings.enabledPlugins?.[pluginKey] === true) {
+        return {
+          platform: "claude-code",
+          configured: true,
+          method: "marketplace plugin",
+          configPath: settingsPath,
+          selfTest: runSelfTest()
+        };
+      }
+    } catch (e) {
+      return {
+        platform: "claude-code",
+        configured: false,
+        error: `Failed to parse settings: ${e instanceof Error ? e.message : String(e)}`
+      };
+    }
+  }
+  const claudeJsonPath = join4(homeDir, ".claude.json");
+  if (existsSync5(claudeJsonPath)) {
+    try {
+      const config = JSON.parse(readFileSync4(claudeJsonPath, "utf-8"));
+      const hooks = config.hooks?.PreToolUse ?? [];
+      const hasSafetyNet = hooks.some((h) => h.command?.includes("cc-safety-net"));
+      if (hasSafetyNet) {
+        return {
+          platform: "claude-code",
+          configured: true,
+          method: "manual hooks config",
+          configPath: claudeJsonPath,
+          selfTest: runSelfTest()
+        };
+      }
+    } catch {}
+  }
+  return { platform: "claude-code", configured: false };
+}
+function detectOpenCode(homeDir) {
+  const configDir = join4(homeDir, ".config", "opencode");
+  const candidates = ["opencode.json", "opencode.jsonc"];
+  for (const filename of candidates) {
+    const configPath = join4(configDir, filename);
+    if (existsSync5(configPath)) {
+      try {
+        const content = readFileSync4(configPath, "utf-8");
+        const json = stripJsonComments(content);
+        const config = JSON.parse(json);
+        const plugins = config.plugin ?? [];
+        const hasSafetyNet = plugins.some((p) => p.includes("cc-safety-net"));
+        if (hasSafetyNet) {
+          return {
+            platform: "opencode",
+            configured: true,
+            method: "plugin array",
+            configPath,
+            selfTest: runSelfTest()
+          };
+        }
+      } catch (e) {
+        return {
+          platform: "opencode",
+          configured: false,
+          error: `Failed to parse config: ${e instanceof Error ? e.message : String(e)}`
+        };
+      }
+    }
+  }
+  return { platform: "opencode", configured: false };
+}
+function detectGeminiCLI(homeDir) {
+  const settingsPath = join4(homeDir, ".gemini", "settings.json");
+  if (!existsSync5(settingsPath)) {
+    return { platform: "gemini-cli", configured: false };
+  }
+  try {
+    const settings = JSON.parse(readFileSync4(settingsPath, "utf-8"));
+    const beforeToolHooks = settings.hooks?.BeforeTool ?? [];
+    const hasSafetyNet = beforeToolHooks.some((h) => {
+      if (typeof h === "string")
+        return h.includes("cc-safety-net");
+      return h.command?.includes("cc-safety-net");
+    });
+    if (hasSafetyNet) {
+      return {
+        platform: "gemini-cli",
+        configured: true,
+        method: "hooks config",
+        configPath: settingsPath,
+        selfTest: runSelfTest()
+      };
+    }
+  } catch (e) {
+    return {
+      platform: "gemini-cli",
+      configured: false,
+      error: `Failed to parse settings: ${e instanceof Error ? e.message : String(e)}`
+    };
+  }
+  return { platform: "gemini-cli", configured: false };
+}
+function detectAllHooks(_cwd, options) {
+  const homeDir = options?.homeDir ?? homedir5();
+  return [detectClaudeCode(homeDir), detectOpenCode(homeDir), detectGeminiCLI(homeDir)];
+}
+
+// src/bin/doctor/permissions.ts
+import { accessSync, constants, existsSync as existsSync6, readdirSync as readdirSync2 } from "node:fs";
+import { homedir as homedir6 } from "node:os";
+import { join as join5 } from "node:path";
+function checkDirPermissions(path) {
+  if (!existsSync6(path)) {
+    return { path, exists: false, readable: false, writable: false };
+  }
+  let readable = false;
+  let writable = false;
+  let fileCount;
+  try {
+    accessSync(path, constants.R_OK);
+    readable = true;
+    fileCount = readdirSync2(path).length;
+  } catch {}
+  try {
+    accessSync(path, constants.W_OK);
+    writable = true;
+  } catch {}
+  return { path, exists: true, readable, writable, fileCount };
+}
+function checkPermissions() {
+  const configDir = join5(homedir6(), ".cc-safety-net");
+  const logDir = join5(configDir, "logs");
+  return {
+    configDir: checkDirPermissions(configDir),
+    logDir: checkDirPermissions(logDir)
+  };
+}
+
+// src/bin/doctor/system-info.ts
+import { homedir as homedir7 } from "node:os";
+var CURRENT_VERSION = "0.6.0";
+function getSystemInfo() {
+  const isBun = typeof Bun !== "undefined";
+  return {
+    version: CURRENT_VERSION,
+    runtime: isBun ? `Bun ${Bun.version}` : `Node ${process.version}`,
+    platform: `${process.platform} ${process.arch}`,
+    shell: process.env.SHELL ?? null,
+    nodeVersion: process.version,
+    homeDir: homedir7()
+  };
+}
+
+// src/bin/doctor/updates.ts
+function isNewerVersion(latest, current) {
+  if (current === "dev")
+    return false;
+  const latestParts = latest.split(".").map(Number);
+  const currentParts = current.split(".").map(Number);
+  const [latestMajor = 0, latestMinor = 0, latestPatch = 0] = latestParts;
+  const [currentMajor = 0, currentMinor = 0, currentPatch = 0] = currentParts;
+  if (latestMajor !== currentMajor)
+    return latestMajor > currentMajor;
+  if (latestMinor !== currentMinor)
+    return latestMinor > currentMinor;
+  return latestPatch > currentPatch;
+}
+async function checkForUpdates() {
+  const currentVersion = getSystemInfo().version;
+  const controller = new AbortController;
+  const timeout = setTimeout(() => controller.abort(), 3000);
+  try {
+    const res = await fetch("https://registry.npmjs.org/cc-safety-net/latest", {
+      signal: controller.signal
+    });
+    if (!res.ok) {
+      return {
+        currentVersion,
+        latestVersion: null,
+        updateAvailable: false,
+        error: `npm registry returned ${res.status}`
+      };
+    }
+    const data = await res.json();
+    const updateAvailable = isNewerVersion(data.version, currentVersion);
+    return {
+      currentVersion,
+      latestVersion: data.version,
+      updateAvailable
+    };
+  } catch (e) {
+    return {
+      currentVersion,
+      latestVersion: null,
+      updateAvailable: false,
+      error: e instanceof Error ? e.message : "Network error"
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// src/bin/doctor/index.ts
+async function runDoctor(options = {}) {
+  const cwd = options.cwd ?? process.cwd();
+  const hooks = detectAllHooks(cwd);
+  const configInfo = getConfigInfo(cwd);
+  const environment = getEnvironmentInfo();
+  const activity = getActivitySummary(7);
+  const permissions = checkPermissions();
+  const update = options.skipUpdateCheck ? {
+    currentVersion: getSystemInfo().version,
+    latestVersion: null,
+    updateAvailable: false
+  } : await checkForUpdates();
+  const system = getSystemInfo();
+  const report = {
+    hooks,
+    userConfig: configInfo.userConfig,
+    projectConfig: configInfo.projectConfig,
+    effectiveRules: configInfo.effectiveRules,
+    shadowedRules: configInfo.shadowedRules,
+    environment,
+    activity,
+    permissions,
+    update,
+    system
+  };
+  if (options.json) {
+    console.log(JSON.stringify(report, null, 2));
+  } else {
+    printReport(report);
+  }
+  const hasFailure = hooks.every((h) => !h.configured) || hooks.some((h) => h.selfTest && h.selfTest.failed > 0) || configInfo.userConfig.exists && !configInfo.userConfig.valid || configInfo.projectConfig.exists && !configInfo.projectConfig.valid;
+  return hasFailure ? 1 : 0;
+}
+function printReport(report) {
+  console.log(formatHeader());
+  console.log();
+  console.log(formatHooksSection(report.hooks));
+  console.log();
+  console.log(formatConfigSection(report));
+  console.log();
+  console.log(formatEnvironmentSection(report.environment));
+  console.log();
+  console.log(formatActivitySection(report.activity));
+  console.log();
+  console.log(formatPermissionsSection(report.permissions));
+  console.log();
+  if (report.update.updateAvailable) {
+    console.log(formatUpdateSection(report.update));
+    console.log();
+  }
+  console.log(formatSystemInfoSection(report.system));
+  console.log(formatSummary(report));
+}
+
 // src/bin/gemini-cli.ts
 function outputGeminiDeny(reason, command, segment) {
   const message = formatBlockedMessage({
@@ -2543,6 +3344,9 @@ function printHelp() {
 Blocks destructive git and filesystem commands before execution.
 
 USAGE:
+  cc-safety-net doctor                   Run diagnostic checks
+  cc-safety-net doctor --json            Output diagnostics as JSON
+  cc-safety-net doctor --skip-update-check  Skip npm registry check
   cc-safety-net -cc, --claude-code       Run as Claude Code PreToolUse hook (reads JSON from stdin)
   cc-safety-net -gc, --gemini-cli        Run as Gemini CLI BeforeTool hook (reads JSON from stdin)
   cc-safety-net -vc, --verify-config     Validate config files
@@ -2566,9 +3370,9 @@ function printVersion() {
 }
 
 // src/bin/statusline.ts
-import { existsSync as existsSync3, readFileSync as readFileSync2 } from "node:fs";
-import { homedir as homedir4 } from "node:os";
-import { join as join3 } from "node:path";
+import { existsSync as existsSync7, readFileSync as readFileSync5 } from "node:fs";
+import { homedir as homedir8 } from "node:os";
+import { join as join6 } from "node:path";
 async function readStdinAsync() {
   if (process.stdin.isTTY) {
     return null;
@@ -2592,15 +3396,15 @@ function getSettingsPath() {
   if (process.env.CLAUDE_SETTINGS_PATH) {
     return process.env.CLAUDE_SETTINGS_PATH;
   }
-  return join3(homedir4(), ".claude", "settings.json");
+  return join6(homedir8(), ".claude", "settings.json");
 }
 function isPluginEnabled() {
   const settingsPath = getSettingsPath();
-  if (!existsSync3(settingsPath)) {
+  if (!existsSync7(settingsPath)) {
     return false;
   }
   try {
-    const content = readFileSync2(settingsPath, "utf-8");
+    const content = readFileSync5(settingsPath, "utf-8");
     const settings = JSON.parse(content);
     if (!settings.enabledPlugins) {
       return false;
@@ -2647,7 +3451,7 @@ async function printStatusline() {
 }
 
 // src/bin/verify-config.ts
-import { existsSync as existsSync4, readFileSync as readFileSync3, writeFileSync } from "node:fs";
+import { existsSync as existsSync8, readFileSync as readFileSync6, writeFileSync } from "node:fs";
 import { resolve as resolve3 } from "node:path";
 var HEADER = "Safety Net Config";
 var SEPARATOR = "═".repeat(HEADER.length);
@@ -2684,7 +3488,7 @@ function printInvalidConfig(scope, path, errors) {
 }
 function addSchemaIfMissing(path) {
   try {
-    const content = readFileSync3(path, "utf-8");
+    const content = readFileSync6(path, "utf-8");
     const parsed = JSON.parse(content);
     if (parsed.$schema) {
       return false;
@@ -2702,14 +3506,14 @@ function verifyConfig(options = {}) {
   let hasErrors = false;
   const configsChecked = [];
   printHeader();
-  if (existsSync4(userConfig)) {
+  if (existsSync8(userConfig)) {
     const result = validateConfigFile(userConfig);
     configsChecked.push({ scope: "User", path: userConfig, result });
     if (result.errors.length > 0) {
       hasErrors = true;
     }
   }
-  if (existsSync4(projectConfig)) {
+  if (existsSync8(projectConfig)) {
     const result = validateConfigFile(projectConfig);
     configsChecked.push({
       scope: "Project",
@@ -2767,6 +3571,9 @@ function handleCliFlags() {
     printCustomRulesDoc();
     process.exit(0);
   }
+  if (args.includes("doctor") || args.includes("--doctor")) {
+    return "doctor";
+  }
   if (args.includes("--statusline")) {
     return "statusline";
   }
@@ -2780,6 +3587,13 @@ function handleCliFlags() {
   console.error("Run 'cc-safety-net --help' for usage.");
   process.exit(1);
 }
+function getDoctorFlags() {
+  const args = process.argv.slice(2);
+  return {
+    json: args.includes("--json"),
+    skipUpdateCheck: args.includes("--skip-update-check")
+  };
+}
 async function main() {
   const mode = handleCliFlags();
   if (mode === "claude-code") {
@@ -2788,6 +3602,13 @@ async function main() {
     await runGeminiCLIHook();
   } else if (mode === "statusline") {
     await printStatusline();
+  } else if (mode === "doctor") {
+    const flags = getDoctorFlags();
+    const exitCode = await runDoctor({
+      json: flags.json,
+      skipUpdateCheck: flags.skipUpdateCheck
+    });
+    process.exit(exitCode);
   }
 }
 main().catch((error) => {
