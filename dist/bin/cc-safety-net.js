@@ -2487,8 +2487,7 @@ function formatRelativeTime(date) {
     return `${minutes}m ago`;
   return "just now";
 }
-function getActivitySummary(days = 7) {
-  const logsDir = join3(homedir4(), ".cc-safety-net", "logs");
+function getActivitySummary(days = 7, logsDir = join3(homedir4(), ".cc-safety-net", "logs")) {
   if (!existsSync3(logsDir)) {
     return { totalBlocked: 0, sessionCount: 0, recentEntries: [] };
   }

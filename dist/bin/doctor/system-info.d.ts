@@ -13,6 +13,12 @@ export declare function getPackageVersion(): string;
  */
 export type VersionFetcher = (args: string[]) => Promise<string | null>;
 /**
+ * Default version fetcher that runs shell commands.
+ * Uses Node.js child_process.spawn for compatibility with both Node and Bun runtimes.
+ * @internal Exported for testing
+ */
+export declare const defaultVersionFetcher: VersionFetcher;
+/**
  * Fetch system info with tool versions.
  * Runs all version checks in parallel for performance.
  */
