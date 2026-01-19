@@ -243,7 +243,22 @@ Add the following to your `~/.claude/settings.json`:
 }
 ```
 
-**Using npm:**
+**Using Claude X:**
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "BUN_BE_BUN=1 claude x cc-safety-net --statusline"
+  }
+}
+```
+> [!NOTE]
+> The `claude x` command is only compatible with the native version of Claude Code. If you installed via npm, please use `npx` or `bunx` instead.
+
+
+
+**Using NPM:**
 
 ```json
 {
