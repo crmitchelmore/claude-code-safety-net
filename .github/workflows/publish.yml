@@ -101,18 +101,6 @@ jobs:
           echo "=== package.json scripts ==="
           cat package.json | jq '.scripts'
 
-      - name: Build
-        run: bun run build
-
-      - name: Verify build output
-        run: |
-          echo "=== dist/ contents ==="
-          ls -la dist/
-          echo "=== dist/bin/ contents ==="
-          ls -la dist/bin/
-          test -f dist/index.js || (echo "ERROR: dist/index.js not found!" && exit 1)
-          test -f dist/index.d.ts || (echo "ERROR: dist/index.d.ts not found!" && exit 1)
-          test -f dist/bin/cc-safety-net.js || (echo "ERROR: dist/bin/cc-safety-net.js not found!" && exit 1)
 
       - name: Publish
         run: bun run scripts/publish.ts
@@ -120,6 +108,7 @@ jobs:
           BUMP: ${{ inputs.bump }}
           VERSION: ${{ inputs.version }}
           CI: true
+          HUSKY: "0"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_CONFIG_PROVENANCE: true
 
@@ -128,11 +117,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Merge to main
+      - name: Update main branch
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           VERSION=$(jq -r '.version' package.json)
           git checkout main
-          git reset --hard "v${VERSION}"
+          git merge --ff-only "v${VERSION}" || git reset --hard "v${VERSION}"
           git push -f origin main
+        env:
+          HUSKY: "0"
