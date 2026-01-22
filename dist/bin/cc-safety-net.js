@@ -2415,7 +2415,7 @@ async function runCopilotCliHook() {
     paranoidInterpreters
   });
   if (result) {
-    const sessionId = `copilot-${input.timestamp}`;
+    const sessionId = `copilot-${input.timestamp ?? Date.now()}`;
     writeAuditLog(sessionId, command, result.segment, result.reason, cwd);
     outputCopilotDeny(result.reason, command, result.segment);
   }

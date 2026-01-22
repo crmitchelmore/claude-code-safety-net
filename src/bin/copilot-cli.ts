@@ -82,7 +82,7 @@ export async function runCopilotCliHook(): Promise<void> {
 
   if (result) {
     // Generate a session ID from timestamp for audit logging
-    const sessionId = `copilot-${input.timestamp}`;
+    const sessionId = `copilot-${input.timestamp ?? Date.now()}`;
     writeAuditLog(sessionId, command, result.segment, result.reason, cwd);
     outputCopilotDeny(result.reason, command, result.segment);
   }
